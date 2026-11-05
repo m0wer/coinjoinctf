@@ -100,6 +100,14 @@ fn parse_tx(r: &mut Reader) -> Tx {
         }
     }
     let locktime = r.take(4);
+    // Bitcoin hashes both txid leaves and pairs of child hashes with SHA256d. A 64-byte
+    // stripped transaction can therefore masquerade as a Merkle internal node. This proof
+    // deliberately excludes such histories; this is not a Bitcoin consensus validity rule.
+    assert_ne!(
+        version.len() + (body_end - body_start) + locktime.len(),
+        64,
+        "ambiguous 64-byte stripped transaction"
+    );
     let mut h = Sha256::new();
     h.update(version);
     h.update(&r.buf[body_start..body_end]);

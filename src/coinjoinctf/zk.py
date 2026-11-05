@@ -94,7 +94,14 @@ def prove(
 
 
 def verify_receipt(receipt: Path, *, allow_fake: bool = False) -> tuple[Journal, dict[str, Any]]:
-    out = _run("verify", str(receipt), dev=allow_fake)
+    if not receipt.is_file():
+        raise SetupProofError("setup receipt is missing; explicitly run setup against the frozen history")
+    try:
+        out = _run("verify", str(receipt), dev=allow_fake)
+    except SetupProofError as error:
+        raise SetupProofError(
+            f"{error}; after a guest upgrade, preserve the prepared state and explicitly rerun setup"
+        ) from error
     if out["fake"] and not allow_fake:
         raise SetupProofError("dev-mode (fake) receipt")
     return Journal.parse(bytes.fromhex(out["journal"])), out
