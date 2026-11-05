@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -26,8 +27,17 @@ _PARAMS = ("n_instances", "n_retained", "entry_fee", "bounty", "abort_csv", "tim
 
 
 def _write_private(path: Path, data: str) -> None:
-    path.write_text(data)
-    path.chmod(0o600)
+    # mkstemp creates mode 0600 before the first secret byte, regardless of the process umask.
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class Session:
