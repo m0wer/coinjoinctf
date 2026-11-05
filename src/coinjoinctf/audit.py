@@ -154,7 +154,7 @@ def audit_entry(rpc: RPC, m: GameManifest, t: Transcript, verify_setup: SetupVer
         [bytes.fromhex(x) for x in d["vin"][0]["txinwitness"]], X_BITS, m.n_retained
     )
 
-    instances = []
+    instances: list[dict[str, Any]] = []
     for n, (j, p) in enumerate(zip(t.retained, publics, strict=True)):
         try:
             bits, _ = evaluate(circuit, p, x_labels[n], [bytes.fromhex(h) for h in t.host_labels[n]])

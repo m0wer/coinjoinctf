@@ -215,7 +215,7 @@ def coinjoin(
     for m in makers:
         mmd = m.mixdepth_for(amount, locked)
         sel = m.wallet.select(mmd, amount, locked) if mmd is not None else None
-        if sel is None:
+        if mmd is None or sel is None:
             return None
         parts.append((m, mmd, sel))
     n_in = len(t_utxos) + sum(len(s) for _, _, s in parts)

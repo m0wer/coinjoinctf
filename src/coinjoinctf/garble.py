@@ -142,8 +142,10 @@ class EvaluationError(Exception):
     """Raised when delivered labels do not match commitments (provable host misbehavior)."""
 
 
-def evaluate(c: Circuit, public: GarbledPublic, x_labels: list[bytes], host_labels: list[bytes]) -> list[int]:
-    """Evaluate with one label per input wire; returns decoded output bits."""
+def evaluate(
+    c: Circuit, public: GarbledPublic, x_labels: list[bytes], host_labels: list[bytes]
+) -> tuple[list[int], list[bytes]]:
+    """Evaluate with one label per input wire; returns decoded output bits and output labels."""
     if len(x_labels) != len(X_WIRES) or len(host_labels) != len(HOST_WIRES):
         raise EvaluationError("wrong number of input labels")
     for i, lab in enumerate(x_labels):

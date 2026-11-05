@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from bitcointx.core.key import XOnlyPubKey
 from bitcointx.core.script import (
@@ -77,7 +78,7 @@ def decode_bits(hashes: tuple[HashPair, ...], preimages: list[bytes]) -> list[in
 
 
 def assert_leaf(host_pk: bytes, part_pk: bytes, lamport: tuple[HashPair, ...]) -> CScript:
-    ops: list[object] = [host_pk, OP_CHECKSIGVERIFY, part_pk, OP_CHECKSIGVERIFY]
+    ops: list[Any] = [host_pk, OP_CHECKSIGVERIFY, part_pk, OP_CHECKSIGVERIFY]
     for h0, h1 in lamport:
         ops += [OP_SHA256, OP_DUP, h0, OP_EQUAL, OP_SWAP, h1, OP_EQUAL, OP_BOOLOR, OP_VERIFY]
     return CScript(ops + [OP_1], name="assert")
@@ -99,7 +100,7 @@ def deliver_leaf(
     """label_hashes[m][i][b] = SHA256(x-label of retained instance m, bit i, value b)."""
     if len(lamport) * (1 + len(label_hashes)) + 2 > MAX_STACK:
         raise ValueError("delivery witness would exceed the BIP342 initial stack limit")
-    ops: list[object] = [host_pk, OP_CHECKSIGVERIFY, part_pk, OP_CHECKSIGVERIFY]
+    ops: list[Any] = [host_pk, OP_CHECKSIGVERIFY, part_pk, OP_CHECKSIGVERIFY]
     for i, (h0, h1) in enumerate(lamport):
         ops += [OP_SHA256, OP_DUP, h1, OP_EQUAL, OP_IF, OP_DROP]
         for inst in label_hashes:
