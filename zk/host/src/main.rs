@@ -14,7 +14,10 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn image_id() -> String {
-    hex(&LINEAGE_ID.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>())
+    hex(&LINEAGE_ID
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect::<Vec<u8>>())
 }
 
 fn fake(receipt: &Receipt) -> bool {
@@ -26,12 +29,18 @@ fn main() {
     match (args.get(1).map(String::as_str), args.len()) {
         (Some("prove"), 4) => {
             let input = std::fs::read(&args[2]).expect("read input");
-            let env = ExecutorEnv::builder().write_slice(&input).build().expect("env");
+            let env = ExecutorEnv::builder()
+                .write_slice(&input)
+                .build()
+                .expect("env");
             let info = default_prover()
                 .prove_with_opts(env, LINEAGE_ELF, &ProverOpts::succinct())
                 .expect("proving failed");
-            info.receipt.verify(LINEAGE_ID).expect("fresh receipt does not verify");
-            std::fs::write(&args[3], bincode::serialize(&info.receipt).unwrap()).expect("write receipt");
+            info.receipt
+                .verify(LINEAGE_ID)
+                .expect("fresh receipt does not verify");
+            std::fs::write(&args[3], bincode::serialize(&info.receipt).unwrap())
+                .expect("write receipt");
             println!(
                 "{{\"journal\":\"{}\",\"image_id\":\"{}\",\"cycles\":{},\"fake\":{}}}",
                 hex(&info.receipt.journal.bytes),
@@ -56,7 +65,9 @@ fn main() {
         }
         (Some("image-id"), 2) => println!("{}", image_id()),
         _ => {
-            eprintln!("usage: ctf-zk prove <input.bin> <receipt.bin> | verify <receipt.bin> | image-id");
+            eprintln!(
+                "usage: ctf-zk prove <input.bin> <receipt.bin> | verify <receipt.bin> | image-id"
+            );
             std::process::exit(2);
         }
     }

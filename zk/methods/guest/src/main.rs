@@ -104,7 +104,11 @@ fn parse_tx(r: &mut Reader) -> Tx {
     h.update(version);
     h.update(&r.buf[body_start..body_end]);
     h.update(locktime);
-    Tx { txid: sha256(&h.finalize()), inputs, outputs }
+    Tx {
+        txid: sha256(&h.finalize()),
+        inputs,
+        outputs,
+    }
 }
 
 fn merkle_root(mut level: Vec<Hash>) -> Hash {
@@ -112,7 +116,10 @@ fn merkle_root(mut level: Vec<Hash>) -> Hash {
         if level.len() % 2 == 1 {
             level.push(*level.last().unwrap());
         }
-        level = level.chunks(2).map(|p| sha256d(&[p[0], p[1]].concat())).collect();
+        level = level
+            .chunks(2)
+            .map(|p| sha256d(&[p[0], p[1]].concat()))
+            .collect();
     }
     level[0]
 }
@@ -126,7 +133,9 @@ fn owned_spks(seed: &Hash, key_limit: u32) -> HashSet<Vec<u8>> {
         h.update(seed);
         h.update(i.to_le_bytes());
         let sk: Hash = h.finalize().into();
-        let Ok(key) = SecretKey::from_slice(&sk) else { continue };
+        let Ok(key) = SecretKey::from_slice(&sk) else {
+            continue;
+        };
         let pk = key.public_key().to_encoded_point(true);
         let mut spk = vec![0x00, 0x14];
         spk.extend_from_slice(&Ripemd160::digest(sha256(pk.as_bytes())));
@@ -143,7 +152,10 @@ fn outpoint_str((txid, vout): &OutPoint) -> String {
 fn main() {
     let mut input = Vec::new();
     env::stdin().read_to_end(&mut input).unwrap();
-    let mut r = Reader { buf: &input, pos: 0 };
+    let mut r = Reader {
+        buf: &input,
+        pos: 0,
+    };
     let seed = r.hash();
     let nonce = r.hash();
     let key_limit = r.u32();
@@ -157,7 +169,10 @@ fn main() {
     let (mut first, mut prev): (Hash, Option<Hash>) = ([0; 32], None);
     for _ in 0..n_blocks {
         let len = r.u32() as usize;
-        let mut b = Reader { buf: r.take(len), pos: 0 };
+        let mut b = Reader {
+            buf: r.take(len),
+            pos: 0,
+        };
         let header = b.take(80);
         let hash = sha256d(header);
         match prev {
@@ -179,7 +194,10 @@ fn main() {
             for (n, spk) in tx.outputs.iter().enumerate() {
                 let op = (tx.txid, n as u32);
                 if op == u0 {
-                    assert!(owned.contains(spk), "U0 is not owned by the committed wallet");
+                    assert!(
+                        owned.contains(spk),
+                        "U0 is not owned by the committed wallet"
+                    );
                     lineage.insert(op);
                 } else if hit && owned.contains(spk) {
                     lineage.insert(op);
@@ -188,11 +206,22 @@ fn main() {
             txids.push(tx.txid);
         }
         assert!(b.done(), "trailing bytes in block");
-        assert_eq!(txids.iter().collect::<HashSet<_>>().len(), txids.len(), "duplicate txid");
-        assert_eq!(&merkle_root(txids)[..], &header[36..68], "merkle root mismatch");
+        assert_eq!(
+            txids.iter().collect::<HashSet<_>>().len(),
+            txids.len(),
+            "duplicate txid"
+        );
+        assert_eq!(
+            &merkle_root(txids)[..],
+            &header[36..68],
+            "merkle root mismatch"
+        );
     }
     assert!(r.done(), "trailing input");
-    assert!(lineage.contains(&u0), "U0 is not created in the block range");
+    assert!(
+        lineage.contains(&u0),
+        "U0 is not created in the block range"
+    );
 
     let mut tips: Vec<String> = lineage.difference(&spent).map(outpoint_str).collect();
     tips.sort();
