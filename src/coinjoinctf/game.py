@@ -46,11 +46,23 @@ from coinjoinctf.circuit import (
     bytes_to_bits,
     game_circuit,
 )
-from coinjoinctf.garble import EvaluationError, GarbledPublic, GarbledSecret, evaluate, garble, verify_opened
+from coinjoinctf.garble import (
+    EvaluationError,
+    GarbledPublic,
+    GarbledSecret,
+    commitment_root,
+    evaluate,
+    garble,
+    verify_opened,
+)
 from coinjoinctf.rpc import RPC, mine
 
 Emit = Callable[..., None]
 SetupVerifier = Callable[["GameManifest"], dict[str, Any]]
+
+
+def choice_message(commitments: list[bytes], retained: list[int]) -> bytes:
+    return hashlib.sha256(b"coinjoinctf/choice/v1" + commitment_root(commitments) + bytes(retained)).digest()
 
 
 def answer_hash(outpoints: list[str]) -> bytes:
@@ -102,6 +114,9 @@ class EntryState:
     deliver_tx: CMutableTransaction | None = None
     deliver_presig: bytes = b""
     asserted_coin: Coin | None = None
+    txids: dict[str, str] = field(default_factory=dict)  # fund, assert, deliver, settle
+    part_pk: bytes = b""
+    choice_sig: bytes = b""  # participant's signature over (instance commitments, retained)
 
 
 class Host:
@@ -118,11 +133,12 @@ class Host:
         abort_csv: int = 6,
         timeout_csv: int = 6,
         settle_csv: int = 6,
+        r: bytes | None = None,
     ) -> None:
         self.rpc, self.history = rpc, history
         self.tips = sorted(set(tips))
         self.y = answer_hash(self.tips)
-        self.r = os.urandom(32)
+        self.r = r or os.urandom(32)
         self.com = answer_commitment(self.y, self.r)
         self.circuit: Circuit = game_circuit(self.com)
         self.key = CCoinKey.from_secret_bytes(os.urandom(32))
@@ -158,11 +174,16 @@ class Host:
         return [g.public for g in st.garbled]
 
     # 2. Open every instance not retained; hand over the host-input labels of retained ones.
-    def open(self, entry: str, retained: list[int]) -> tuple[dict[int, bytes], list[list[bytes]]]:
+    def open(
+        self, entry: str, retained: list[int], part_pk: bytes, choice_sig: bytes
+    ) -> tuple[dict[int, bytes], list[list[bytes]]]:
         st = self.entries[entry]
         if len(set(retained)) != self.params["n_retained"]:
             raise ValueError("wrong number of retained instances")
-        st.retained = sorted(retained)
+        msg = choice_message([g.public.commitment() for g in st.garbled], sorted(retained))
+        if not XOnlyPubKey(part_pk).verify_schnorr(msg, choice_sig):
+            raise ValueError("invalid choice signature")
+        st.retained, st.part_pk, st.choice_sig = sorted(retained), part_pk, choice_sig
         opened = {i: s for i, s in enumerate(st.seeds) if i not in st.retained}
         bits = bytes_to_bits(self.y + self.r)
         labels = [
@@ -177,6 +198,8 @@ class Host:
     ) -> bytes:  # fmt: skip
         st = self.entries[entry]
         pubs = [st.garbled[j].public for j in st.retained]
+        if terms.part_pk != st.part_pk:
+            raise ValueError("terms are not from the participant who chose the instances")
         if terms.host_pk != self.pk or terms.label_hashes != [p.x_label_hashes for p in pubs]:
             raise ValueError("terms do not commit to the retained instances")
         if terms.win_hashes != [p.output_label_hashes[OUT_WIN][1] for p in pubs]:
@@ -195,6 +218,7 @@ class Host:
         sh = d_script.sighash_schnorr(deliver_tx, 0, [asserted.txout()])
         if not XOnlyPubKey(terms.part_pk).verify_schnorr(sh, deliver_presig):
             raise ValueError("invalid participant presignature on the deliver transaction")
+        st.txids["fund"] = contract_coin.txid
         st.terms, st.deliver_tx, st.deliver_presig, st.asserted_coin = (
             terms, deliver_tx, deliver_presig, asserted,
         )  # fmt: skip
@@ -213,7 +237,9 @@ class Host:
         tx = st.deliver_tx
         sig = self.key.sign_schnorr_no_tweak(script.sighash_schnorr(tx, 0, [st.asserted_coin.txout()]))
         set_witness(tx, 0, ct.deliver_witness(preimages, labels, st.deliver_presig, sig, script, cb))
-        return broadcast(self.rpc, tx), bits
+        st.txids["assert"] = assert_txid
+        st.txids["deliver"] = broadcast(self.rpc, tx)
+        return st.txids["deliver"], bits
 
     # 5. If no winning label shows up before settle_csv, the stake goes to the host.
     def settle(self, entry: str, deliver_txid: str) -> str:
@@ -224,7 +250,8 @@ class Host:
         tx = new_tx([coin], [(coin.value - 300, bytes(p2tr_key(self.key)))], sequence=st.terms.settle_csv)
         sig = self.key.sign_schnorr_no_tweak(script.sighash_schnorr(tx, 0, [coin.txout()]))
         set_witness(tx, 0, [sig, bytes(script), cb])
-        return broadcast(self.rpc, tx)
+        st.txids["settle"] = broadcast(self.rpc, tx)
+        return st.txids["settle"]
 
     def reveal(self) -> dict[str, Any]:
         """Optional post-game disclosure. The contract never depends on it."""
@@ -290,6 +317,10 @@ class Participant:
         rng = secrets.SystemRandom()
         self.retained = sorted(rng.sample(range(len(publics)), self.m.n_retained))
         return self.retained
+
+    def choice_signature(self) -> bytes:
+        """Signed choice: lets third parties check the host did not pick the retained instances."""
+        return self.key.sign_schnorr_no_tweak(choice_message(self.commitments, self.retained))
 
     def verify(self, opened: dict[int, bytes], host_labels: list[list[bytes]]) -> int:
         """Cut-and-choose: every non-retained instance must re-garble to its prior commitment."""
@@ -404,7 +435,7 @@ def play_entry(host: Host, player: Participant, guess: list[str], emit: Emit, *,
          table_bytes=len(publics[0].tables), and_gates=host.circuit.and_count)  # fmt: skip
     retained = player.choose(publics)
     emit("choose", retained=retained)
-    opened, host_labels = host.open(entry, retained)
+    opened, host_labels = host.open(entry, retained, player.pk, player.choice_signature())
     checked = player.verify(opened, host_labels)
     emit("verified", opened=sorted(opened), checked=checked, cheat_probability=m.cheat_probability)
 
