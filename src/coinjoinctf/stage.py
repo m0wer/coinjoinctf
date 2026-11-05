@@ -503,7 +503,7 @@ class Stage:
         for r in recs:
             r.height = height
             self.txs.append(r)
-            self.emit("tx", r.public())
+            self.emit("tx", {"tx": r.public()})
         self.emit("block", {"height": height, "txs": len(recs)})
         return recs
 
