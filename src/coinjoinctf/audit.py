@@ -5,8 +5,9 @@ instances are published only as tables, label hashes and the host's input labels
 wire, which hides the bit). Anyone can check that the participant signed the instance choice,
 that every opened instance is an honest garbling, which guess the participant committed on-chain,
 and what the retained instances output on the labels the deliver script forced. With the setup
-proof, ``win = 0, o1 = 1`` proves the guess differs from a committed complete tip set, while the
-set itself stays hidden.
+proof, ``win = 0, o1 = 1`` establishes a different wallet-scoped tip set conditional on honest
+random cut-and-choose selection and its soundness bound. The signed choice does not prove randomness;
+this audit is not an independent proof of retained-circuit correctness. The set stays hidden.
 """
 
 from __future__ import annotations

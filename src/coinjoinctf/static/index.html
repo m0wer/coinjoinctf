@@ -7,7 +7,7 @@
 </head>
 <body>
 <header>
-  <h1>CoinJoin CTF <span>find every tip of U0, win the bounty trustlessly</span></h1>
+  <h1>CoinJoin CTF <span>find U0's wallet-scoped tips, claim the funded bounty</span></h1>
   <div id="status" class="badge">connecting</div>
 </header>
 <main>
@@ -24,6 +24,8 @@
   <aside>
     <div class="card">
       <h2>Game</h2>
+      <p class="muted">Host demo console (regtest only). Answer shortcuts are not a participant interface.
+        Circuit fairness uses probabilistic cut-and-choose, not an unconditional proof.</p>
       <div class="row">
         <button id="btn-stage">1. Run JoinMarket stage</button>
         <button id="btn-setup">2. Host setup + ZK proof</button>
@@ -35,7 +37,7 @@
       <h2>Your guess <small>click unspent outputs in the graph</small></h2>
       <ol id="guess-list"></ol>
       <div class="row">
-        <button id="btn-near" title="host-side shortcut: one tip swapped for an equal-valued sibling">Near miss</button>
+        <button id="btn-near" title="host-side shortcut: one tip swapped for an equal-valued sibling">Near miss (host shortcut)</button>
         <button id="btn-correct" title="host-side shortcut for the demo">Correct (host cheat)</button>
         <button id="btn-clear">Clear</button>
       </div>
@@ -49,7 +51,7 @@
       <div id="timeline"></div>
       <div class="row">
         <button id="btn-audit">Public audit of last entry</button>
-        <button id="btn-reveal">Reveal answer</button>
+        <button id="btn-reveal">Reveal answer (host only)</button>
       </div>
     </div>
   </aside>

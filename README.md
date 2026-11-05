@@ -3,9 +3,9 @@
 **Can you undo a CoinJoin? Prove it and take the sats.**
 
 A host sends one coin (U0) through a realistic JoinMarket history and locks a bounty behind a
-Bitcoin contract. Name **every** coin that U0 ended up in and you claim the bounty yourself: no
-judge, no host cooperation. Guess wrong and you lose your entry fee, but anyone can verify that your
-guess was wrong and that a correct answer existed, without learning the answer.
+Bitcoin contract. Name **every** tip in the committed wallet and claim the bounty yourself: no
+judge. Guess wrong and you lose your entry fee. A setup proof establishes a wallet-scoped answer;
+a public audit checks the result without revealing it, subject to cut-and-choose soundness.
 
 ![The web demo after a win: the host's path from U0 to its three tips drawn in green](docs/img/reveal.png)
 
@@ -14,15 +14,15 @@ garbled circuit, a Taproot contract, and a RISC Zero zero-knowledge proof.
 
 ## The idea
 
-Chain analysis claims are cheap. This turns them into a bet with real money and a referee that
-nobody has to trust. Four questions, four mechanisms:
+Chain analysis claims are cheap. This turns them into a bet enforced by Bitcoin, with explicit
+cryptographic assumptions and limits. Four questions, four mechanisms:
 
 | A participant asks | Answer | Mechanism |
 |---|---|---|
-| Is there really an answer, and is it complete? | Proven before you pay | **ZK setup proof** (RISC Zero) |
+| Is there really an answer, and is it complete? | Proven for the declared wallet and range before you pay | **ZK setup proof** (RISC Zero) |
 | Who decides whether my guess is right? | A circuit, not the host | **Garbled circuit** with cut-and-choose |
 | Who pays out? | Bitcoin Script, to the winner alone | **Taproot contract**, hashlocked on the circuit's "win" output |
-| I lost. Was it fair? | Anyone can check, the answer stays hidden | **Public audit** from the chain and a transcript |
+| I lost. Was it fair? | Public checks with the same cut-and-choose assumptions | **Public audit** from the chain and a transcript |
 
 ## The challenge
 
@@ -30,8 +30,8 @@ The host withdraws U0 from an "exchange" and runs a JoinMarket tumbler among sim
 (offers, real timelocked fidelity bonds, bond-weighted selection) and random takers, block by block
 with random delays. Then the history is frozen.
 
-The answer is the set of **tips**: start at U0, follow every transaction that spends one of the
-host's coins, keep the outputs that go back to the host's wallet, and stop at the coins still
+The answer is the set of **tips**: start at U0, follow every transaction that spends a lineage
+coin, keep the outputs that go back to the specified committed wallet, and stop at the coins still
 unspent at the end. Equal-amount outputs, change and peel chains all count. Outputs to makers or
 payees end their branch.
 
@@ -102,6 +102,9 @@ without revealing its wallet or the tips, that:
   for `i < key_limit`) owns U0, which is created in the range;
 - the tips are exactly the owned lineage outputs unspent at the end block, and `com` hashes them.
 
+This establishes an answer under that definition, not every key the human host controls or a unique
+economic allocation of satoshis through a CoinJoin. The tip set may be empty.
+
 The public journal holds the wallet commitment, `key_limit`, U0, the first and last block hashes,
 the block count, the tip count and `com`. Every participant must verify the receipt before entering
 and checks the block hashes against **its own node**. Proving takes minutes; verifying takes
@@ -130,12 +133,19 @@ Cheating on the inputs therefore hands the participant a win. Cheating on the ci
 what cut-and-choose catches: per entry the host garbles 20 fresh instances (half-gates, free-XOR,
 22,222 AND gates, 0.7 MB each) and commits to them, the participant keeps 3 at random and signs
 the choice, and the host opens the other 17 for re-garbling. Because the circuits are fresh and the
-guess is committed on-chain before any label is released, nobody can test a guess offline.
+guess is committed and confirmed on-chain before its input labels are released, these messages do
+not provide a free offline candidate-testing oracle. Each offer has one immutable signed choice;
+an identical retry opens only the original discarded instances.
 
 ### 3. Taproot contract: Bitcoin Script pays the winner
 
 Three outputs, a NUMS internal key (no key-path spend), and every transition presigned by the party
 that would lose from a redirect:
+
+No bounty-address private key is encrypted or escrowed. The prize is a newly funded entry UTXO,
+whose descendant has a hashlock on a circuit's winning output label plus the participant's signature.
+Both parties validate the actual funded outpoint, stake, scripts and complete transaction templates,
+including fixed regtest fees, before signing. The payout is the remaining stake after mining fees.
 
 ```mermaid
 flowchart LR
@@ -159,8 +169,9 @@ After an entry the host publishes a transcript: circuit commitments, the signed 
 seeds, the kept circuits' tables, the host's input labels, the Lamport hashes and the txids. Anyone
 can re-check the choice signature, re-garble the opened circuits, read the guess from the assert
 witness and the labels from the deliver witness, re-evaluate the kept circuits, and re-verify the
-setup proof. `win = 0, o1 = 1` on every kept circuit proves that the guess differs from a committed,
-complete tip set. The answer stays hidden: kept seeds are never revealed, and each host input
+setup proof. Conditional on the cut-and-choose assumptions, `win = 0, o1 = 1` on every kept circuit
+establishes that the guess differs from the committed wallet-scoped tip set. This is not an independent
+zero-knowledge proof of circuit correctness. The answer stays hidden: kept seeds are never revealed, and each host input
 label hides its bit.
 
 ## Demo walkthrough
@@ -214,25 +225,53 @@ backup is `tmp/talk-video/demo.mp4` (and `.webm`) plus one screenshot per phase.
 
 ## Trust model and known limits
 
-- **Cut-and-choose soundness.** A host that garbles dishonestly survives the opening with
-  probability `1 / C(20, 3) = 1/1140` per entry. A malformed kept instance shows up as an evaluation
-  error, which the audit reports as host misbehavior.
+- **Cut-and-choose soundness.** With an honest, independently random participant selection, the
+  dishonest-batch escape bound is `1 / C(20, 3) = 1/1140`, about 0.088% (only 10 bits of soundness).
+  This is not cryptographically negligible. Repeated offers/selective aborts accumulate risk; the
+  signature binds a choice but cannot prove it was random. The public audit inherits these assumptions.
+  A malformed kept instance can cause an evaluation error; reporting misbehavior does not itself
+  reimburse a participant. An honest kept instance can still release a winning label.
 - **Stalling does not help the host.** If it never delivers labels, `timeout` pays the participant
   the whole contract (entry fee and bounty).
 - **The host can always win its own bounty.** It knows the answer and funds the game, so that only
   costs itself.
-- **Serial entries.** A winning assert publishes the answer bits on-chain, so the game ends at the
-  first win. Timing races (a late assert against the host's `abort` leaf) are not addressed;
-  participants should assert promptly.
+- **Serial entries.** A winning assert publishes the answer digest, not necessarily the tip list.
+  The host must stop offering entries for that commitment after the first win. CSV branches do not
+  expire competing spends: late assert/abort, delivery/timeout and claim/settlement races remain
+  possible. Both parties must monitor the chain and act before the competing timelock matures.
 - **Ownership is part of the definition.** Only outputs of the committed wallet (`key_limit` keys,
   padded to a multiple of 16 to hide the exact address count) are tips; payments to anyone else end
-  that branch. The proof covers the frozen block range only.
+  that branch, even if the same person controls another wallet. The proof covers the frozen block
+  range only and authenticates headers against the participant's validating node, not through an
+  independent Bitcoin consensus implementation in the guest.
+- **Restricted proof histories.** The guest rejects transactions with exactly 64 bytes of stripped
+  (non-witness) serialization to prevent Merkle leaf/internal-node ambiguity. Such transactions are
+  not necessarily invalid under Bitcoin consensus; histories containing them are unsupported here.
 - **Out of band leaks are out of scope.** Anyone who learns the host's transactions directly (a
   colluding maker set, the host itself) can win.
 - **Dev mode** (`--dev`) uses fake RISC Zero receipts for fast iteration; without `--dev`,
   participants reject them.
 - **Demo shape.** Regtest only. Host and participant live in one process but only exchange protocol
-  messages.
+  messages. The loopback web UI is a host-operated presentation console, not a competitive public
+  service: unauthenticated correct-answer, near-miss and reveal endpoints intentionally disclose
+  host knowledge. Do not expose it to participants as their interface.
+
+### Brute-force limits
+
+The default tumbler finishes with three tips. Graph depth and transaction count are not security
+parameters: many paths may lead to the same final set. With `M` plausible terminal outputs and a
+public tip count `k`, there are at most `C(M, k)` candidate sets, before amount, timing, co-spend and
+maker-information filtering. For 1,000 outputs and three tips, that is only 166 million sets
+(27.3 bits at most), not an established security level. If the three destination transactions are
+known, choosing one among 4 to 7 equal outputs in each leaves only 64 to 343 combinations.
+
+The salted commitment and single-use garblings provide no free exact equality oracle under their
+cryptographic assumptions. Analysts can still rank candidates or derive an answer using side
+information. Each ordinary exact test costs an entry. Ignoring mining fees, a candidate with success
+probability `p` has expected profit `p*bounty - (1-p)*entry_fee`; the default 100:1 bounty/fee ratio
+makes roughly 1% confidence near break-even. Assess the attacker's best candidate probabilities and
+budget, not just a graph size. The contract accepts a 128-bit answer digest and cannot establish how
+it was learned; digest leakage is sufficient to win without recovering the path.
 
 Measured on a 16-core CPU (no GPU):
 
@@ -246,7 +285,8 @@ Measured on a 16-core CPU (no GPU):
 
 ## Quick start
 
-Requirements: Docker, [uv](https://docs.astral.sh/uv/), and the RISC Zero toolchain
+Requirements: Docker, [uv](https://docs.astral.sh/uv/), native `libsecp256k1` with Schnorr/x-only
+support (Ubuntu: `sudo apt-get install libsecp256k1-dev`), and the RISC Zero toolchain
 ([rzup](https://dev.risczero.com/api/zkvm/install)) to build the prover.
 
 ```sh
@@ -279,6 +319,15 @@ stage and the proof live). Screencast of a fresh dev-mode game:
 `uv run --with playwright python demo/record.py`. Terminal recording:
 `asciinema rec -c "uv run coinjoinctf --dev demo --fresh --makers 8 --takers 3 --pause 1.5" tmp/demo.cast`.
 
+### Upgrading a prepared demo
+
+Rebuilding the changed guest produces a different image ID. Old receipts prove the old program and
+are rejected by the new verifier. Missing or invalid receipts never trigger automatic proving or
+stage generation. Preserve the original prepared state and receipts; copy the private `stage.json`
+into a new state directory and explicitly run `setup` there against the still-running node's frozen
+history. Setup publishes a new nonce, commitment and receipt, so do not mix old entry transcripts
+with the new manifest. No chain rescan, deletion or expensive proof generation runs merely on load.
+
 ## Layout
 
 | Path | What |
@@ -302,6 +351,10 @@ uv run pytest
 Regtest tests skip without the node, and ZK tests skip without the built prover. ZK tests run the
 guest for real in dev mode (only the seal is fake) and compare its journal with the Python oracle
 `stage.owned_tips`.
+
+CI has a fast lint/regtest job and a pinned RISC Zero build/demo job that rejects skipped tests.
+Guest-execution tests are not production proof generation; fake receipts remain rejected by the
+production verifier. The format-only ambiguity regressions do not claim a valid-chain attack proof.
 
 ## Authors and license
 

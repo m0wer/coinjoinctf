@@ -128,7 +128,7 @@ const H = {
     render();
     $("graph-scroll").scrollLeft = 0;  // back to U0
     $("graph-info").textContent = `history frozen at blocks ${e.start_height}..${e.end_height}: ${e.txs} txs, ${e.outputs} outputs`;
-    tl(`History frozen: <b>find every unspent descendant of U0</b> ${tx(e.u0)}`, "ok");
+    tl(`History frozen: <b>find U0's unspent tips in the committed wallet</b> ${tx(e.u0)}`, "ok");
   },
   proving(e) { tl(`Host proves the setup statement in RISC Zero (${e.dev ? "dev mode" : "real STARK"}, ${e.blocks} blocks)…`, "pending"); },
   setup(e) {
@@ -141,7 +141,7 @@ const H = {
     S.lastEntry = e.name;
     tl(`Entry ${e.name}`, "head");
     tl(`Participant verified the setup proof against its own node${e.setup.fake ? " (dev receipt)" : ""}: ` +
-       `the committed answer is the complete tip set (${e.setup.n_tips} tips)`, "ok");
+       `the answer is the complete tip set for the declared wallet and range (${e.setup.n_tips} tips)`, "ok");
   },
   guess(e) { tl(`Guess: ${e.tips.length} outputs, x = ${tx(e.x)}`); },
   offer(e) {
@@ -174,7 +174,9 @@ const H = {
   audit(e) {
     tl(`Public audit of ${e.name}`, "head");
     tl(`<div class="verdict"><b>${e.verdict}</b><br><span class="muted">checked: choice signature, ${e.opened_checked} opened circuits, ` +
-       `on-chain guess ${short(e.guess, 12)}, labels re-evaluated, setup proof. The answer stays hidden.</span></div>`);
+       `on-chain guess ${short(e.guess, 12)}, labels re-evaluated, setup proof. ` +
+       `Conditional on an honest random selection; batch escape bound 1/${Math.round(1 / e.cheat_probability)}. ` +
+       `The answer stays hidden.</span></div>`);
   },
   reveal(e) { S.reveal = e; render(); tl(`Revealed: ${e.host_txids.length} host transactions, tips highlighted in green`, "ok"); },
   error(e) { tl(e.message, "err"); },
