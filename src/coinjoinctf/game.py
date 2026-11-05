@@ -11,11 +11,12 @@ import hashlib
 import os
 import secrets
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from math import comb
 from typing import Any
 
-from bitcointx.core import CMutableTransaction
+from bitcointx.core import CMutableTransaction, CTransaction
 from bitcointx.core.key import XOnlyPubKey
 from bitcointx.core.script import CScript
 from bitcointx.wallet import CCoinKey
@@ -111,9 +112,10 @@ class EntryState:
     garbled: list[GarbledSecret] = field(default_factory=list)
     retained: list[int] = field(default_factory=list)
     terms: ct.ContractTerms | None = None
-    deliver_tx: CMutableTransaction | None = None
+    deliver_tx: CTransaction | None = None
     deliver_presig: bytes = b""
     asserted_coin: Coin | None = None
+    contract_coin: Coin | None = None
     txids: dict[str, str] = field(default_factory=dict)  # fund, assert, deliver, settle
     part_pk: bytes = b""
     choice_sig: bytes = b""  # participant's signature over (instance commitments, retained)
@@ -157,7 +159,11 @@ class Host:
         _, (coin,) = fund(self.rpc, [(amount, bytes(p2tr_key(self.key)))], confirm=False)
         return coin
 
-    def sign_funding(self, tx: CMutableTransaction, idx: int, spent: list[Coin]) -> None:
+    def sign_funding(self, entry: str, tx: CMutableTransaction, idx: int, spent: list[Coin]) -> None:
+        coin = self.entries[entry].contract_coin
+        if coin is None:
+            raise ValueError("entry terms have not been accepted")
+        _check_funding(tx, idx, spent, self.key, coin, self.params["bounty"])
         sign_p2tr_key(tx, idx, spent, self.key)
 
     def manifest(self, proof: str | None) -> GameManifest:
@@ -168,6 +174,8 @@ class Host:
 
     # 1. Commit to N fresh garbled instances for this entry (nothing here depends on the guess).
     def offer(self, entry: str) -> list[GarbledPublic]:
+        if entry in self.entries:
+            raise ValueError("entry already offered; use a fresh entry identifier")
         st = self.entries[entry] = EntryState()
         st.seeds = [os.urandom(32) for _ in range(self.params["n_instances"])]
         st.garbled = [garble(self.circuit, s) for s in st.seeds]
@@ -178,12 +186,19 @@ class Host:
         self, entry: str, retained: list[int], part_pk: bytes, choice_sig: bytes
     ) -> tuple[dict[int, bytes], list[list[bytes]]]:
         st = self.entries[entry]
-        if len(set(retained)) != self.params["n_retained"]:
+        if len(retained) != self.params["n_retained"] or len(set(retained)) != len(retained):
             raise ValueError("wrong number of retained instances")
+        if any(not 0 <= i < len(st.garbled) for i in retained):
+            raise ValueError("retained instance index out of range")
         msg = choice_message([g.public.commitment() for g in st.garbled], sorted(retained))
         if not XOnlyPubKey(part_pk).verify_schnorr(msg, choice_sig):
             raise ValueError("invalid choice signature")
-        st.retained, st.part_pk, st.choice_sig = sorted(retained), part_pk, choice_sig
+        if st.retained:
+            if st.retained != sorted(retained) or st.part_pk != part_pk:
+                raise ValueError("entry choice is already fixed")
+        else:
+            # Freeze the choice before disclosing any seed. Identical retries are harmless.
+            st.retained, st.part_pk, st.choice_sig = sorted(retained), part_pk, choice_sig
         opened = {i: s for i, s in enumerate(st.seeds) if i not in st.retained}
         bits = bytes_to_bits(self.y + self.r)
         labels = [
@@ -197,6 +212,11 @@ class Host:
         deliver_tx: CMutableTransaction, deliver_presig: bytes,
     ) -> bytes:  # fmt: skip
         st = self.entries[entry]
+        if not st.retained:
+            raise ValueError("entry has no fixed choice")
+        if st.terms is not None:
+            raise ValueError("entry terms already accepted")
+        terms.validate(X_BITS, self.params["n_retained"])
         pubs = [st.garbled[j].public for j in st.retained]
         if terms.part_pk != st.part_pk:
             raise ValueError("terms are not from the participant who chose the instances")
@@ -209,19 +229,33 @@ class Host:
             p["abort_csv"], p["timeout_csv"], p["settle_csv"],
         ):  # fmt: skip
             raise ValueError("timelocks differ from the manifest")
-        asserted = Coin(_txid(assert_tx), 0, assert_tx.vout[0].nValue, ct.tree_spk(terms.asserted_tree()))
-        if bytes(assert_tx.vout[0].scriptPubKey) != asserted.spk or len(assert_tx.vout) != 1:
-            raise ValueError("assert transaction must pay the agreed asserted output")
-        if bytes(deliver_tx.vout[0].scriptPubKey) != ct.tree_spk(terms.delivered_tree()):
-            raise ValueError("deliver transaction must pay the agreed delivered output")
+        if (
+            contract_coin.vout != 0
+            or contract_coin.value != p["bounty"] + p["entry_fee"]
+            or contract_coin.spk != ct.tree_spk(terms.contract_tree())
+        ):
+            raise ValueError("funding coin does not match the agreed contract and stake")
+        expected_assert, expected_deliver = _entry_templates(terms, contract_coin)
+        if _unsigned(assert_tx) != _unsigned(expected_assert):
+            raise ValueError("assert transaction differs from the agreed template")
+        if _unsigned(deliver_tx) != _unsigned(expected_deliver):
+            raise ValueError("deliver transaction differs from the agreed template")
+        asserted = Coin(
+            _txid(expected_assert), 0, expected_assert.vout[0].nValue, ct.tree_spk(terms.asserted_tree())
+        )
         d_script, _ = ct.leaf(terms.asserted_tree(), "deliver")
         sh = d_script.sighash_schnorr(deliver_tx, 0, [asserted.txout()])
         if not XOnlyPubKey(terms.part_pk).verify_schnorr(sh, deliver_presig):
             raise ValueError("invalid participant presignature on the deliver transaction")
         st.txids["fund"] = contract_coin.txid
-        st.terms, st.deliver_tx, st.deliver_presig, st.asserted_coin = (
-            terms, deliver_tx, deliver_presig, asserted,
-        )  # fmt: skip
+        # Never retain mutable objects owned by the peer after approving them.
+        st.terms, st.deliver_tx, st.deliver_presig, st.asserted_coin, st.contract_coin = (
+            deepcopy(terms),
+            CTransaction.from_tx(expected_deliver),
+            deliver_presig,
+            asserted,
+            contract_coin,
+        )
         a_script, _ = ct.leaf(terms.contract_tree(), "assert")
         return self.key.sign_schnorr_no_tweak(a_script.sighash_schnorr(assert_tx, 0, [contract_coin.txout()]))
 
@@ -229,12 +263,17 @@ class Host:
     def deliver(self, entry: str, assert_txid: str) -> tuple[str, list[int]]:
         st = self.entries[entry]
         assert st.terms and st.deliver_tx and st.asserted_coin
-        items = _witness(self.rpc, assert_txid)
+        if assert_txid != st.asserted_coin.txid:
+            raise ValueError("unexpected assertion transaction")
+        asserted_tx = self.rpc.getrawtransaction(assert_txid, True)
+        if asserted_tx.get("confirmations", 0) < 1:
+            raise ValueError("assertion must be confirmed before releasing labels")
+        items = [bytes.fromhex(x) for x in asserted_tx["vin"][0]["txinwitness"]]
         preimages = ct.parse_assert_witness(items, X_BITS)
         bits = ct.decode_bits(st.terms.lamport, preimages)
         labels = [[st.garbled[j].input_label(w, bits[n]) for n, w in enumerate(X_WIRES)] for j in st.retained]
         script, cb = ct.leaf(st.terms.asserted_tree(), "deliver")
-        tx = st.deliver_tx
+        tx = st.deliver_tx.to_mutable()
         sig = self.key.sign_schnorr_no_tweak(script.sighash_schnorr(tx, 0, [st.asserted_coin.txout()]))
         set_witness(tx, 0, ct.deliver_witness(preimages, labels, st.deliver_presig, sig, script, cb))
         st.txids["assert"] = assert_txid
@@ -258,7 +297,7 @@ class Host:
         return {"tips": self.tips, "y": self.y.hex(), "r": self.r.hex()}
 
 
-def _txid(tx: CMutableTransaction) -> str:
+def _txid(tx: CMutableTransaction | CTransaction) -> str:
     return bytes(tx.GetTxid())[::-1].hex()
 
 
@@ -307,6 +346,9 @@ class Participant:
         return coin
 
     def sign_funding(self, tx: CMutableTransaction, idx: int, spent: list[Coin]) -> None:
+        if self.contract_coin is None or not self.host_presig:
+            raise ValueError("host presignature is required before funding")
+        _check_funding(tx, idx, spent, self.key, self.contract_coin, self.m.entry_fee)
         sign_p2tr_key(tx, idx, spent, self.key)
 
     def choose(self, publics: list[GarbledPublic]) -> list[int]:
@@ -344,26 +386,23 @@ class Participant:
             win_hashes=[p.output_label_hashes[OUT_WIN][1] for p in pubs],
             abort_csv=self.m.abort_csv, timeout_csv=self.m.timeout_csv, settle_csv=self.m.settle_csv,
         )  # fmt: skip
-        return self.terms_
+        return deepcopy(self.terms_)
 
     def prepare(self, contract_coin: Coin) -> tuple[CMutableTransaction, CMutableTransaction, bytes]:
         """Build the assert and deliver templates (fees fixed now) and presign deliver."""
         t = self.terms_
         assert t
+        t.validate(X_BITS, self.m.n_retained)
+        if contract_coin.value != self.m.entry_fee + self.m.bounty or contract_coin.spk != ct.tree_spk(
+            t.contract_tree()
+        ):
+            raise ValueError("funding coin does not match the agreed contract and stake")
         self.contract_coin = contract_coin
-        a_script, a_cb = ct.leaf(t.contract_tree(), "assert")
-        atx = new_tx([contract_coin], [(contract_coin.value, ct.tree_spk(t.asserted_tree()))])
-        set_witness(atx, 0, ct.assert_witness([bytes(32)] * X_BITS, bytes(64), bytes(64), a_script, a_cb))
-        atx.vout[0].nValue = contract_coin.value - vsize(atx) * FEERATE
+        atx, dtx = _entry_templates(t, contract_coin)
         asserted = Coin(_txid(atx), 0, atx.vout[0].nValue, ct.tree_spk(t.asserted_tree()))
-        d_script, d_cb = ct.leaf(t.asserted_tree(), "deliver")
-        dtx = new_tx([asserted], [(asserted.value, ct.tree_spk(t.delivered_tree()))])
-        dummy_labels = [[bytes(16)] * X_BITS for _ in self.retained]
-        dummy = ct.deliver_witness([bytes(32)] * X_BITS, dummy_labels, bytes(64), bytes(64), d_script, d_cb)
-        set_witness(dtx, 0, dummy)
-        dtx.vout[0].nValue = asserted.value - vsize(dtx) * FEERATE
+        d_script, _ = ct.leaf(t.asserted_tree(), "deliver")
         presig = self.key.sign_schnorr_no_tweak(d_script.sighash_schnorr(dtx, 0, [asserted.txout()]))
-        self.assert_tx = atx
+        self.assert_tx = atx.to_mutable()
         return atx, dtx, presig
 
     def check_host_presig(self, sig: bytes) -> None:
@@ -423,6 +462,48 @@ class Participant:
 FUND_FEE_SHARE = 600
 
 
+def _unsigned(tx: CMutableTransaction | CTransaction) -> bytes:
+    return tx.serialize(include_witness=False)
+
+
+def _entry_templates(t: ct.ContractTerms, coin: Coin) -> tuple[CMutableTransaction, CMutableTransaction]:
+    """Own the exact transition outputs and fixed regtest fees, independently of peer witnesses."""
+    a_script, a_cb = ct.leaf(t.contract_tree(), "assert")
+    atx = new_tx([coin], [(coin.value, ct.tree_spk(t.asserted_tree()))])
+    set_witness(atx, 0, ct.assert_witness([bytes(32)] * X_BITS, bytes(64), bytes(64), a_script, a_cb))
+    atx.vout[0].nValue -= vsize(atx) * FEERATE
+    asserted = Coin(_txid(atx), 0, atx.vout[0].nValue, ct.tree_spk(t.asserted_tree()))
+    d_script, d_cb = ct.leaf(t.asserted_tree(), "deliver")
+    dtx = new_tx([asserted], [(asserted.value, ct.tree_spk(t.delivered_tree()))])
+    labels = [[bytes(16)] * X_BITS for _ in t.win_hashes]
+    set_witness(
+        dtx, 0, ct.deliver_witness([bytes(32)] * X_BITS, labels, bytes(64), bytes(64), d_script, d_cb)
+    )
+    dtx.vout[0].nValue -= vsize(dtx) * FEERATE
+    if dtx.vout[0].nValue <= 0:
+        raise ValueError("stake cannot cover the transition fees")
+    return atx, dtx
+
+
+def _check_funding(
+    tx: CMutableTransaction,
+    idx: int,
+    spent: list[Coin],
+    key: CCoinKey,
+    coin: Coin,
+    own_stake: int,
+) -> None:
+    if len(spent) != 2 or idx not in (0, 1) or spent[0].outpoint == spent[1].outpoint:
+        raise ValueError("funding must spend the two distinct stake inputs")
+    if spent[idx].spk != bytes(p2tr_key(key)) or spent[idx].value != own_stake + FUND_FEE_SHARE:
+        raise ValueError("funding input does not match this party's stake")
+    if sum(c.value for c in spent) != coin.value + 2 * FUND_FEE_SHARE:
+        raise ValueError("funding fee differs from the agreed fee")
+    expected = new_tx(spent, [(coin.value, coin.spk)])
+    if _unsigned(tx) != _unsigned(expected) or coin.vout != 0 or _txid(tx) != coin.txid:
+        raise ValueError("funding transaction differs from the agreed template")
+
+
 def play_entry(host: Host, player: Participant, guess: list[str], emit: Emit, *, host_stalls: bool = False
                ) -> dict[str, Any]:  # fmt: skip
     """One complete entry. Each step only uses values the acting party legitimately holds."""
@@ -450,7 +531,7 @@ def play_entry(host: Host, player: Participant, guess: list[str], emit: Emit, *,
     atx, dtx, presig = player.prepare(contract_coin)
     player.check_host_presig(host.accept_terms(entry, terms, atx, contract_coin, dtx, presig))
     player.sign_funding(fund_tx, 0, [pc, hc])
-    host.sign_funding(fund_tx, 1, [pc, hc])
+    host.sign_funding(entry, fund_tx, 1, [pc, hc])
     fund_txid = broadcast(rpc, fund_tx)
     mine(rpc)
     emit("funded", txid=fund_txid, stake=stake, entry_fee=m.entry_fee, bounty=m.bounty,

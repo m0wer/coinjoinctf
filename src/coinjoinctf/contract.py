@@ -125,6 +125,23 @@ class ContractTerms:
     timeout_csv: int
     settle_csv: int
 
+    def validate(self, n_bits: int, n_instances: int) -> None:
+        """Validate peer-supplied dimensions and unambiguous bit commitments before signing."""
+        if len(self.lamport) != n_bits:
+            raise ValueError(f"expected {n_bits} Lamport pairs")
+        if len(self.label_hashes) != n_instances or len(self.win_hashes) != n_instances:
+            raise ValueError("wrong number of retained label vectors")
+        for group in (self.lamport, *self.label_hashes):
+            if len(group) != n_bits:
+                raise ValueError("wrong label vector width")
+            for pair in group:
+                if len(pair) != 2 or any(not isinstance(h, bytes) or len(h) != 32 for h in pair):
+                    raise ValueError("expected pairs of 32-byte hashes")
+                if pair[0] == pair[1]:
+                    raise ValueError("zero and one hashes must be distinct")
+        if any(not isinstance(h, bytes) or len(h) != 32 for h in self.win_hashes):
+            raise ValueError("expected 32-byte win hashes")
+
     def contract_tree(self) -> TaprootScriptTree:
         leaves = [
             assert_leaf(self.host_pk, self.part_pk, self.lamport),
