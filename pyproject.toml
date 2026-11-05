@@ -1,0 +1,43 @@
+[project]
+name = "coinjoinctf"
+version = "0.1.0"
+description = "Garbled-circuit CoinJoin tracing CTF: find every tip of a UTXO, claim the bounty trustlessly"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "python-bitcointx>=2.2.0",
+    "pydantic>=2.8",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+coinjoinctf = "coinjoinctf.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# The python-bitcointx fork (2.2.x, Taproot + MuSig2 fixes), checked out next to this repo.
+python-bitcointx = { path = "../python-bitcointx" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["regtest: needs the docker regtest node (docker compose up -d)"]
