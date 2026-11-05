@@ -1,0 +1,17 @@
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:30.0
+    command:
+      - -regtest=1
+      - -server=1
+      - -txindex=1
+      - -rpcuser=ctf
+      - -rpcpassword=ctf
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -fallbackfee=0.0002
+      - -printtoconsole=1
+    ports:
+      - "127.0.0.1:18743:18443"
+    tmpfs:
+      - /home/bitcoin/.bitcoin
