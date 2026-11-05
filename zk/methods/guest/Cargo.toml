@@ -1,0 +1,22 @@
+[package]
+name = "lineage"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+risc0-zkvm = { version = "^3.0.6", default-features = false, features = ["std"] }
+k256 = { version = "=0.13.3", default-features = false, features = ["arithmetic", "ecdsa", "std"] }
+sha2 = "=0.10.8"
+ripemd = "0.1"
+
+[patch.crates-io]
+# RISC Zero precompile-accelerated SHA-256 and secp256k1.
+sha2 = { git = "https://github.com/risc0/RustCrypto-hashes", tag = "sha2-v0.10.8-risczero.0" }
+k256 = { git = "https://github.com/risc0/RustCrypto-elliptic-curves", tag = "k256/v0.13.3-risczero.1" }
+crypto-bigint = { git = "https://github.com/risc0/RustCrypto-crypto-bigint", tag = "v0.5.5-risczero.0" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
