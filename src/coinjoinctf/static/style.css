@@ -36,7 +36,7 @@ svg text { fill: var(--muted); font-size: 10px; }
 .tx { fill: #30363d; stroke: #484f58; } .tx.coinjoin { fill: #3b2a55; stroke: #6e40c9; }
 .tx.deposit { fill: #4d3b00; stroke: var(--gold); } .tx.host { stroke: var(--green); stroke-width: 2.5; }
 .tx.new { animation: flash 1s; } @keyframes flash { from { fill: #fff; } }
-.out { fill: #6e7681; } .out.unspent { stroke: var(--fg); stroke-width: 1; cursor: pointer; }
+.out.unspent { stroke: var(--fg); stroke-width: 1; cursor: pointer; }
 .out.unspent:hover { r: 6; } .out.u0 { fill: var(--gold) !important; stroke: #fff; }
 .out.hostout { fill: var(--green) !important; } .out.sel { fill: var(--blue) !important; stroke: #fff; stroke-width: 2; r: 5; }
 .out.tip { r: 6; stroke: var(--green); stroke-width: 3; }

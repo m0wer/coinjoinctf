@@ -1,7 +1,7 @@
 // CoinJoin CTF web demo: live transaction graph + protocol timeline. No build step, no deps.
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
-const S = { txs: [], u0: null, guess: [], reveal: null, entries: [], lastEntry: null, busy: null, fresh: new Set(), idles: 0 };
+const S = { txs: [], u0: null, guess: [], reveal: null, entries: [], lastEntry: null, busy: null, fresh: new Set(), idles: 0, range: null, replaying: false };
 const short = (h, n = 10) => (h && h.length > n ? h.slice(0, n) + "…" : h);
 const btc = (s) => (s / 1e8).toFixed(4);
 const hue = (v) => { let h = 7; for (const c of String(v)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
@@ -25,7 +25,8 @@ function render() {
   const spent = new Set();
   S.txs.forEach((t) => t.inputs.forEach((i) => spent.add(i.outpoint)));
   const heights = S.txs.map((t) => t.height);
-  const h0 = Math.min(...heights), h1 = Math.max(...heights);
+  // A frozen history keeps its full width while it is replayed; a live stage grows.
+  const h0 = S.range ? S.range[0] : Math.min(...heights), h1 = S.range ? S.range[1] : Math.max(...heights);
   // Fit the whole history in the visible width (scroll only for very long histories).
   const avail = $("graph-scroll").clientWidth - 2 * PAD - TXW - 20;
   const COL = Math.max(28, Math.min(120, Math.floor(avail / Math.max(h1 - h0, 1))));
@@ -105,7 +106,7 @@ const tx = (id) => `<code title="${id}">${short(id)}</code>`;
 
 const H = {
   stage_start() {
-    Object.assign(S, { txs: [], u0: null, reveal: null, guess: [], entries: [], lastEntry: null });
+    Object.assign(S, { txs: [], u0: null, reveal: null, guess: [], entries: [], lastEntry: null, range: null });
     $("timeline").innerHTML = "";
     $("manifest").innerHTML = '<span class="muted">No game published yet.</span>';
     renderGuess(); render();
@@ -122,7 +123,7 @@ const H = {
     const sc = $("graph-scroll"); sc.scrollLeft = sc.scrollWidth;
   },
   stage_done(e) {
-    S.u0 = e.u0;
+    S.u0 = e.u0; S.range = [e.start_height, e.end_height];
     S.txs = S.txs.filter((t) => t.height >= e.start_height);  // drop warm-up blocks: same view as a reload
     render();
     $("graph-scroll").scrollLeft = 0;  // back to U0
@@ -134,7 +135,7 @@ const H = {
     const j = e.journal, m = e.manifest;
     tl(`Setup proof: ${e.cycles.toLocaleString()} cycles in ${e.seconds}s. Public journal: <b>${j.n_tips} tips</b>, ` +
        `com ${tx(j.com)}, wallet ${tx(j.wallet_commitment)}`, "ok");
-    showManifest(m, e.fake);
+    showManifest(m, e.fake ? "dev-mode receipt (fake seal)" : `real STARK receipt, proved in ${Math.round(e.seconds / 60)} min`);
   },
   entry(e) {
     S.lastEntry = e.name;
@@ -181,12 +182,18 @@ const H = {
 };
 
 // ---------- controls ----------
-function showManifest(m, fake) {
+function proofText(p) {
+  if (!p) return "no proof on file";
+  if (p.error) return `proof INVALID: ${p.error}`;
+  return p.fake ? "dev-mode receipt (fake seal)" : `real STARK receipt, verified in ${p.verify_ms} ms`;
+}
+
+function showManifest(m, proof) {
   $("manifest").innerHTML =
     `Bounty <b>${btc(m.bounty)} BTC</b>, entry fee ${btc(m.entry_fee)} BTC, ${m.n_tips} tips, ` +
     `${m.n_instances} circuits keep ${m.n_retained}, timelocks ${m.timeout_csv} blocks` +
     `<br><span class="muted">U0 ${short(m.history.u0, 18)}, blocks ${m.history.start_height}..${m.history.end_height}, ` +
-    `proof ${fake === undefined ? "on file" : fake ? "dev mode" : "real STARK"}</span>`;
+    `${proof}</span>`;
 }
 
 function setBusy(op) {
@@ -210,6 +217,7 @@ $("btn-play").onclick = () => {
 };
 $("btn-audit").onclick = () => (S.lastEntry ? post(`/api/audit/${S.lastEntry}`) : tl("No finished entry yet", "err"));
 $("btn-reveal").onclick = () => post("/api/reveal");
+$("btn-replay").onclick = replay;
 $("btn-clear").onclick = () => { S.guess = []; renderGuess(); render(); };
 for (const [id, kind] of [["btn-near", "near_miss"], ["btn-correct", "correct"]]) {
   $(id).onclick = async () => {
@@ -225,12 +233,37 @@ async function init() {
     S.txs = st.stage.txs; S.u0 = st.stage.u0; render();
     $("graph-info").textContent = `blocks ${st.stage.start_height}..${st.stage.end_height}: ${S.txs.length} transactions`;
   }
-  if (st.manifest) showManifest(st.manifest);
+  if (st.stage) {
+    S.range = [st.stage.start_height, st.stage.end_height];
+    tl(`History frozen at blocks ${st.stage.start_height}..${st.stage.end_height}: ` +
+       `<b>find every unspent descendant of U0</b> ${tx(st.stage.u0)}`, "ok");
+  }
+  if (st.manifest) {
+    showManifest(st.manifest, proofText(st.proof));
+    tl(`Game published: ${st.manifest.n_tips} tips committed, ${proofText(st.proof)}`, "ok");
+  }
   S.lastEntry = st.entries.length ? st.entries[st.entries.length - 1] : null;
   setBusy(st.busy);
   const es = new EventSource(`/api/events?since=${st.offset}`);
   es.onmessage = (m) => { const e = JSON.parse(m.data); (H[e.kind] || (() => {}))(e); };
   es.onerror = () => { $("status").textContent = "reconnecting"; };
 }
+// Animate a frozen history block by block (for a precomputed game: same view as a live stage).
+async function replay() {
+  if (S.replaying || !S.txs.length) return;
+  S.replaying = true;
+  const all = S.txs.slice().sort((a, b) => a.height - b.height);
+  const heights = [...new Set(all.map((t) => t.height))];
+  S.txs = [];
+  for (const h of heights) {
+    for (const t of all) if (t.height === h) { S.txs.push(t); S.fresh.add(t.txid); }
+    render();
+    $("graph-info").textContent = `block ${h}: ${S.txs.length} transactions so far`;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  $("graph-info").textContent = `history frozen at blocks ${heights[0]}..${heights[heights.length - 1]}: ${S.txs.length} txs`;
+  S.replaying = false;
+}
+
 window.addEventListener("resize", scheduleRender);
 init();

@@ -37,8 +37,10 @@ def test_full_flow_over_http(tmp_path: Path) -> None:
     assert (
         state["stage"]["txs"] and not {"tips", "tumbler_seed", "owners", "host_txids"} & state["stage"].keys()
     )
+    assert c.get("/api/state").json()["proof"] is None
     c.post("/api/setup")
     _wait(c)
+    assert c.get("/api/state").json()["proof"]["fake"] is True  # dev mode: shown as a fake receipt
     near = c.get("/api/demo-guess/near_miss").json()
     c.post("/api/play", json={"tips": near})
     _wait(c)

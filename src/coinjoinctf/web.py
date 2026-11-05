@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from coinjoinctf import zk
 from coinjoinctf.rpc import RPC, node
 from coinjoinctf.session import Session
 from coinjoinctf.stage import StageConfig
@@ -87,12 +88,29 @@ def create_app(state: Path, dev: bool, rpc: RPC | None = None) -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
 
+    proofs: dict[str, dict[str, Any]] = {}
+
+    def proof_info() -> dict[str, Any] | None:
+        """Receipt summary for display; participants still verify it themselves on entry."""
+        m = s.manifest
+        if m is None or not m.proof:
+            return None
+        if m.com not in proofs:
+            t0 = time.time()
+            try:
+                _, out = zk.verify_receipt(Path(m.proof), allow_fake=True)
+                proofs[m.com] = {"fake": out["fake"], "verify_ms": round((time.time() - t0) * 1000)}
+            except zk.SetupProofError as e:
+                proofs[m.com] = {"error": str(e)}
+        return proofs[m.com]
+
     @app.get("/api/state")
     def get_state() -> dict[str, Any]:
         pub = s.stage.public() if s.stage else None
         return {
             "stage": pub,
             "manifest": s.manifest.model_dump() if s.manifest else None,
+            "proof": proof_info(),
             "entries": s.entries,
             "busy": hub.busy,
             "dev": dev,
