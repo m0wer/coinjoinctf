@@ -23,8 +23,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-# The python-bitcointx fork (2.2.x, Taproot + MuSig2 fixes), checked out next to this repo.
-python-bitcointx = { path = "../python-bitcointx" }
+# python-bitcointx fork (2.2.x, Taproot + MuSig2 fixes), not on PyPI.
+python-bitcointx = { git = "https://github.com/m0wer/python-bitcointx.git", rev = "0014ef0af75d146ebc7ec8778b90e4f22c1ec62d" }
 
 [tool.ruff]
 line-length = 110
