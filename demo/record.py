@@ -1,7 +1,7 @@
 """Record the web demo as a screencast (Playwright + headless Chromium).
 
     uv run --with playwright python demo/record.py                         # fresh game, dev-mode proof
-    uv run --with playwright python demo/record.py --from tmp/talk --real  # prepared game, real proof
+    uv run --with playwright python demo/record.py --from tmp/talk --real --pace 2.5  # prepared game
 
 Fresh mode clicks through the whole story (stage, setup proof, near miss, public audit, correct
 guess and claim, reveal). ``--from DIR`` copies a prepared game (``coinjoinctf stage`` + ``setup``),
@@ -40,6 +40,9 @@ def main() -> None:
     p.add_argument("--real", action="store_true", help="participants require a real STARK receipt")
     p.add_argument("--from", dest="source", help="prepared state directory (stage + setup done)")
     p.add_argument("--out", default="tmp/recording")
+    p.add_argument(
+        "--pace", type=float, default=1.0, help="multiply every pause (slower video for narration)"
+    )
     a = p.parse_args()
     out, state = Path(a.out), Path(a.out) / "state"
     shutil.rmtree(out, ignore_errors=True)
@@ -56,12 +59,12 @@ def main() -> None:
                 break
             except OSError:
                 time.sleep(0.2)
-        record(out, prepared=bool(a.source))
+        record(out, prepared=bool(a.source), pace=a.pace)
     finally:
         server.kill()
 
 
-def record(out: Path, prepared: bool) -> None:
+def record(out: Path, prepared: bool, pace: float = 1.0) -> None:
     errors: list[str] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -71,16 +74,16 @@ def record(out: Path, prepared: bool) -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"http://127.0.0.1:{PORT}/")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(2000 * pace)
 
         def shot(name: str, seconds: float | None = None, pause: int = 2500) -> None:
-            page.wait_for_timeout(pause)
+            page.wait_for_timeout(pause * pace)
             page.screenshot(path=str(out / f"{name}.png"))
             print(f"{name}: {'' if seconds is None else f'{seconds:.1f} s'}", flush=True)
 
         def pick(button: str) -> None:
             page.click(button)
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1500 * pace)
 
         if prepared:
             page.click("#btn-replay")

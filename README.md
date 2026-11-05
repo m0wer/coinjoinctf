@@ -203,7 +203,7 @@ a 31-block game on a 16-core CPU), then run the rest live: each entry takes abou
 docker compose up -d                                   # keep it running: the chain lives in tmpfs
 uv run coinjoinctf --state tmp/talk stage --makers 8 --takers 3
 uv run coinjoinctf --state tmp/talk setup              # real STARK proof
-uv run --with playwright python demo/record.py --from tmp/talk --real --out tmp/talk-video  # backup video
+uv run --with playwright python demo/record.py --from tmp/talk --real --pace 2.5 --out tmp/talk-video  # backup
 uv run coinjoinctf --state tmp/talk serve              # live: http://127.0.0.1:8000
 ```
 
