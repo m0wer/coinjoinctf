@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CoinJoin CTF</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>CoinJoin CTF <span>find every tip of U0, win the bounty trustlessly</span></h1>
+  <div id="status" class="badge">connecting</div>
+</header>
+<main>
+  <section id="graph-wrap">
+    <div id="graph-head">
+      <span id="graph-info">No stage yet</span>
+      <span class="legend">
+        <i class="dot u0"></i>U0 <i class="dot eq"></i>equal outputs <i class="dot ch"></i>change / payment
+        <i class="ring"></i>unspent <i class="dot sel"></i>your guess <i class="dot tip"></i>revealed lineage
+      </span>
+    </div>
+    <div id="graph-scroll"><svg id="graph"></svg></div>
+  </section>
+  <aside>
+    <div class="card">
+      <h2>Game</h2>
+      <div class="row">
+        <button id="btn-stage">1. Run JoinMarket stage</button>
+        <button id="btn-setup">2. Host setup + ZK proof</button>
+      </div>
+      <div id="manifest" class="muted">No game published yet.</div>
+    </div>
+    <div class="card">
+      <h2>Your guess <small>click unspent outputs in the graph</small></h2>
+      <ol id="guess-list"></ol>
+      <div class="row">
+        <button id="btn-near" title="host-side shortcut: one tip swapped for an equal-valued sibling">Near miss</button>
+        <button id="btn-correct" title="host-side shortcut for the demo">Correct (host cheat)</button>
+        <button id="btn-clear">Clear</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="stall"> host stalls</label>
+        <button id="btn-play" class="primary">3. Pay entry fee and play</button>
+      </div>
+    </div>
+    <div class="card grow">
+      <h2>Protocol</h2>
+      <div id="timeline"></div>
+      <div class="row">
+        <button id="btn-audit">Public audit of last entry</button>
+        <button id="btn-reveal">Reveal answer</button>
+      </div>
+    </div>
+  </aside>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
