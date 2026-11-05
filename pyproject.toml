@@ -5,6 +5,7 @@ description = "Garbled-circuit CoinJoin tracing CTF: find every tip of a UTXO, c
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+authors = [{ name = "Adam Gibson (waxwing)" }, { name = "m0wer" }]
 dependencies = [
     "python-bitcointx>=2.2.0",
     "pydantic>=2.8",

@@ -179,3 +179,7 @@ uv run pytest
 Regtest tests skip without the node, and ZK tests skip without the built prover. ZK tests run the
 guest for real in dev mode (only the seal is fake) and compare its journal with the Python oracle
 `stage.owned_tips`.
+
+## Authors and license
+
+Adam Gibson (waxwing) and m0wer. Released under the [MIT License](LICENSE).
