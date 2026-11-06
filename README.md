@@ -205,24 +205,6 @@ entry fee plus bounty with the win label, unilaterally.
 **5. Reveal (optional).** After the game, the host can disclose its transactions: the lineage
 from U0 to the tips is drawn in green.
 
-## Presenting it
-
-After the [quick start](#quick-start), prepare the game beforehand (the real proof took 7 min for
-a 31-block game on a 16-core CPU), then run the rest live: each entry takes about 3 s.
-
-```sh
-docker compose up -d                                   # keep it running: the chain lives in tmpfs
-uv run coinjoinctf --state tmp/talk stage --makers 8 --takers 3
-uv run coinjoinctf --state tmp/talk setup              # real STARK proof
-uv run --with playwright python demo/record.py --from tmp/talk --real --pace 2.5 --out tmp/talk-video  # backup
-uv run coinjoinctf --state tmp/talk serve              # live: http://127.0.0.1:8000
-```
-
-On the page: **Replay history** animates the graph block by block. Then **Near miss**, **Pay entry
-fee and play**, **Public audit of last entry**, **Correct**, **Pay entry fee and play** again, and
-**Reveal answer**. The recorder works on a copy of the state, so the live game starts clean. The
-backup is `tmp/talk-video/demo.mp4` (and `.webm`) plus one screenshot per phase.
-
 ## Trust model and known limits
 
 - **Cut-and-choose soundness.** With an honest, independently random participant selection, the
@@ -316,34 +298,11 @@ that withholds labels.
 `uv run coinjoinctf --dev serve` starts the web UI on a fresh dev-mode game (buttons 1 and 2 run the
 stage and the proof live). Screencast of a fresh dev-mode game:
 `uv run --with playwright python -m playwright install chromium` (once), then
-`uv run --with playwright python demo/record.py`. Terminal recording:
-`asciinema rec -c "uv run coinjoinctf --dev demo --fresh --makers 8 --takers 3 --pause 1.5" tmp/demo.cast`.
+`uv run --with playwright python demo/record.py`.
 
-### Upgrading a prepared demo
-
-Rebuilding the changed guest produces a different image ID. Old receipts prove the old program and
-are rejected by the new verifier. Missing or invalid receipts never trigger automatic proving or
-stage generation. Preserve the original prepared state and receipts; copy the private `stage.json`
-into a new state directory and explicitly run `setup` there against the still-running node's frozen
-history. Setup publishes a new nonce, commitment and receipt, so do not mix old entry transcripts
-with the new manifest. No chain rescan, deletion or expensive proof generation runs merely on load.
-
-The web setup button requires confirmation before regenerating an existing game's proof and
-commitment. Canceling sends no setup request. For a prepared demo, normally skip setup and play.
-
-## Layout
-
-| Path | What |
-|---|---|
-| `src/coinjoinctf/circuit.py` | Game circuit with a SHA-256 gadget and constant folding |
-| `src/coinjoinctf/garble.py` | Half-gates garbler/evaluator, commitments, opened-instance checks |
-| `src/coinjoinctf/contract.py` | Taproot leaves, Lamport commitments, witnesses |
-| `src/coinjoinctf/game.py` | Host and participant roles, one entry end to end |
-| `src/coinjoinctf/stage.py` | JoinMarket ecosystem, fidelity bonds, tumbler, reference tip oracle |
-| `src/coinjoinctf/zk.py`, `zk/` | RISC Zero guest (the setup statement) and `ctf-zk prove/verify` |
-| `src/coinjoinctf/audit.py` | Entry transcript and third-party audit |
-| `src/coinjoinctf/session.py`, `cli.py`, `web.py`, `static/` | Orchestration, CLI, web demo |
-| `demo/record.py` | Playwright screencast of the web demo |
+Receipts are bound to the guest image ID: after rebuilding a changed guest, old receipts are
+rejected. Nothing re-proves automatically; run `setup` again explicitly while the node still holds
+the frozen history.
 
 ## Tests
 

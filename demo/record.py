@@ -1,7 +1,7 @@
 """Record the web demo as a screencast (Playwright + headless Chromium).
 
     uv run --with playwright python demo/record.py                         # fresh game, dev-mode proof
-    uv run --with playwright python demo/record.py --from tmp/talk --real --pace 2.5  # prepared game
+    uv run --with playwright python demo/record.py --from DIR --real                  # prepared game
 
 Fresh mode clicks through the whole story (stage, setup proof, near miss, public audit, correct
 guess and claim, reveal). ``--from DIR`` copies a prepared game (``coinjoinctf stage`` + ``setup``),
