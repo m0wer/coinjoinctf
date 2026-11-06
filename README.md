@@ -295,7 +295,8 @@ uv run coinjoinctf --dev demo --fresh --makers 8 --takers 3
 
 `demo` narrates the whole story in about 20 s: the JoinMarket stage, the setup proof, a near miss
 (one tip swapped for an equal-valued sibling) that loses and is publicly audited, a correct guess
-that wins and claims, and the optional reveal.
+that wins and claims, and the optional reveal. `--dev` makes a fake proof so this stays fast;
+without it, the proof is a real STARK (12 to 20 min) and participants reject fake ones.
 
 Step by step (state lives in `tmp/game`, host secrets in mode 0600 files):
 
@@ -310,8 +311,11 @@ uv run coinjoinctf reveal                         # host: optional disclosure af
 `play --demo-guess correct|near_miss` lets the host pick the guess, and `--stall` simulates a host
 that withholds labels.
 
-`uv run coinjoinctf --dev serve` starts the web UI on a fresh dev-mode game (buttons 1 and 2 run the
-stage and the proof live). Screencast of a fresh dev-mode game:
+`uv run coinjoinctf --dev serve` starts the web UI at http://127.0.0.1:8000 (buttons 1 and 2 run the
+stage and a fake proof live). To show a real proof, run `stage` and `setup` above first, then
+`uv run coinjoinctf serve` and click "Replay history" instead of buttons 1 and 2.
+
+Screencast of a fresh dev-mode game:
 `uv run --with playwright python -m playwright install chromium` (once), then
 `uv run --with playwright python demo/record.py`.
 
