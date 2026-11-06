@@ -1,7 +1,8 @@
 // CoinJoin CTF web demo: live transaction graph + protocol timeline. No build step, no deps.
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
-const S = { txs: [], u0: null, guess: [], reveal: null, entries: [], lastEntry: null, busy: null, fresh: new Set(), idles: 0, range: null, replaying: false };
+// An undefined manifest means initial state is still loading, not that setup is absent.
+const S = { txs: [], u0: null, manifest: undefined, guess: [], reveal: null, entries: [], lastEntry: null, busy: null, fresh: new Set(), idles: 0, range: null, replaying: false };
 const short = (h, n = 10) => (h && h.length > n ? h.slice(0, n) + "…" : h);
 const btc = (s) => (s / 1e8).toFixed(4);
 const hue = (v) => { let h = 7; for (const c of String(v)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
@@ -106,7 +107,7 @@ const tx = (id) => `<code title="${id}">${short(id)}</code>`;
 
 const H = {
   stage_start() {
-    Object.assign(S, { txs: [], u0: null, reveal: null, guess: [], entries: [], lastEntry: null, range: null });
+    Object.assign(S, { txs: [], u0: null, manifest: null, reveal: null, guess: [], entries: [], lastEntry: null, range: null });
     $("timeline").innerHTML = "";
     $("manifest").innerHTML = '<span class="muted">No game published yet.</span>';
     renderGuess(); render();
@@ -191,6 +192,7 @@ function proofText(p) {
 }
 
 function showManifest(m, proof) {
+  S.manifest = m;
   $("manifest").innerHTML =
     `Bounty <b>${btc(m.bounty)} BTC</b>, entry fee ${btc(m.entry_fee)} BTC, ${m.n_tips} tips, ` +
     `${m.n_instances} circuits keep ${m.n_retained}, timelocks ${m.timeout_csv} blocks` +
@@ -212,7 +214,14 @@ async function post(path, body) {
 }
 
 $("btn-stage").onclick = () => post("/api/stage", { makers: 8, takers: 3, block_delay: 0.25 });
-$("btn-setup").onclick = () => post("/api/setup");
+$("btn-setup").onclick = () => {
+  if (S.manifest === undefined) return;
+  if (S.manifest && !window.confirm(
+    "A game is already set up. Regenerating its proof takes several minutes and replaces the current " +
+    "commitment and proof. Existing entries cannot be audited against the new setup. Continue?"
+  )) return;
+  return post("/api/setup");
+};
 $("btn-play").onclick = () => {
   if (!S.guess.length) return tl("Select at least one unspent output", "err");
   post("/api/play", { tips: S.guess, stall: $("stall").checked });
@@ -231,6 +240,7 @@ for (const [id, kind] of [["btn-near", "near_miss"], ["btn-correct", "correct"]]
 
 async function init() {
   const st = await (await fetch("/api/state")).json();
+  S.manifest = st.manifest;
   if (st.stage) {
     S.txs = st.stage.txs; S.u0 = st.stage.u0; render();
     $("graph-info").textContent = `blocks ${st.stage.start_height}..${st.stage.end_height}: ${S.txs.length} transactions`;

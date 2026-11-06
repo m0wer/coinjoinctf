@@ -328,6 +328,9 @@ into a new state directory and explicitly run `setup` there against the still-ru
 history. Setup publishes a new nonce, commitment and receipt, so do not mix old entry transcripts
 with the new manifest. No chain rescan, deletion or expensive proof generation runs merely on load.
 
+The web setup button requires confirmation before regenerating an existing game's proof and
+commitment. Canceling sends no setup request. For a prepared demo, normally skip setup and play.
+
 ## Layout
 
 | Path | What |
@@ -346,7 +349,10 @@ with the new manifest. No chain rescan, deletion or expensive proof generation r
 
 ```sh
 uv run pytest
+node --test tests/test_setup_confirmation.js
 ```
+
+Browser control tests use Node's built-in test runner, with no package dependencies.
 
 Regtest tests skip without the node, and ZK tests skip without the built prover. ZK tests run the
 guest for real in dev mode (only the seal is fake) and compare its journal with the Python oracle
