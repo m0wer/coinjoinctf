@@ -24,5 +24,6 @@ def test_demo_tells_the_whole_story(tmp_path: Path, capsys: pytest.CaptureFixtur
              "Public audit of entry1: lost", "Entry entry2", "WIN", "claimed", "Reveal"]  # fmt: skip
     positions = [out.index(s) for s in order]
     assert positions == sorted(positions)
+    assert "proven: U0 was spent; 3 tips in 3 txs, each >= " in out
     assert (tmp_path / "stage.json").stat().st_mode & 0o777 == 0o600
     assert sorted(p.name for p in (tmp_path / "entries").iterdir()) == ["entry1.json", "entry2.json"]

@@ -135,8 +135,8 @@ const H = {
   setup(e) {
     const j = e.journal, m = e.manifest;
     tl(`Setup proof: ${e.cycles.toLocaleString()} cycles in ${e.seconds}s. Public journal: <b>${j.n_tips} tips</b>, ` +
-       `com ${tx(j.com)}, wallet ${tx(j.wallet_commitment)}`, "ok");
-    showManifest(m, e.fake ? "dev-mode receipt (fake seal)" : `real STARK receipt, proved in ${Math.round(e.seconds / 60)} min`);
+       `com ${tx(j.com)}, wallet ${tx(j.wallet_commitment)}${shapeText(j, "<br>")}`, "ok");
+    showManifest(m, e.fake ? "dev-mode receipt (fake seal)" : `real STARK receipt, proved in ${Math.round(e.seconds / 60)} min`, j);
   },
   entry(e) {
     S.lastEntry = e.name;
@@ -191,13 +191,21 @@ function proofText(p) {
   return p.fake ? "dev-mode receipt (fake seal)" : `real STARK receipt, verified in ${p.verify_ms} ms`;
 }
 
-function showManifest(m, proof) {
+// The lineage shape the setup proof discloses (minimums over the tips), from a verified journal.
+function shapeText(j, prefix = "") {
+  if (!j || j.tip_txs === undefined) return "";
+  return `${prefix}<span class="proven">Proven: U0 was spent; ${j.n_tips} tips in ${j.tip_txs} txs, ` +
+    `each ≥ ${j.min_depth} hops from U0, anonymity set ≥ ${j.min_anonymity}, ` +
+    `≥ ${j.min_foreign_inputs} outside inputs per hop</span>`;
+}
+
+function showManifest(m, proof, journal) {
   S.manifest = m;
   $("manifest").innerHTML =
     `Bounty <b>${btc(m.bounty)} BTC</b>, entry fee ${btc(m.entry_fee)} BTC, ${m.n_tips} tips, ` +
     `${m.n_instances} circuits keep ${m.n_retained}, timelocks ${m.timeout_csv} blocks` +
     `<br><span class="muted">U0 ${short(m.history.u0, 18)}, blocks ${m.history.start_height}..${m.history.end_height}, ` +
-    `${proof}</span>`;
+    `${proof}</span>${shapeText(journal, "<br>")}`;
 }
 
 function setBusy(op) {
@@ -251,7 +259,7 @@ async function init() {
        `<b>find every unspent descendant of U0</b> ${tx(st.stage.u0)}`, "ok");
   }
   if (st.manifest) {
-    showManifest(st.manifest, proofText(st.proof));
+    showManifest(st.manifest, proofText(st.proof), st.proof && st.proof.journal);
     tl(`Game published: ${st.manifest.n_tips} tips committed, ${proofText(st.proof)}`, "ok");
   }
   S.lastEntry = st.entries.length ? st.entries[st.entries.length - 1] : null;

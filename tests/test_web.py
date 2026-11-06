@@ -41,6 +41,7 @@ def test_full_flow_over_http(tmp_path: Path) -> None:
     c.post("/api/setup")
     _wait(c)
     assert c.get("/api/state").json()["proof"]["fake"] is True  # dev mode: shown as a fake receipt
+    assert c.get("/api/state").json()["proof"]["journal"]["tip_txs"] == 3  # proven shape for the page
     near = c.get("/api/demo-guess/near_miss").json()
     c.post("/api/play", json={"tips": near})
     _wait(c)

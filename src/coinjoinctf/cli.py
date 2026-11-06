@@ -21,6 +21,12 @@ def short(h: str, n: int = 10) -> str:
     return h[:n] + "…" if len(h) > n else h
 
 
+def shape(j: dict[str, Any]) -> str:
+    """The lineage shape the setup proof discloses (minimums over the tips)."""
+    return (f"{j['n_tips']} tips in {j['tip_txs']} txs, each >= {j['min_depth']} hops from U0, "
+            f"anonymity set >= {j['min_anonymity']}, >= {j['min_foreign_inputs']} outside inputs per hop")  # fmt: skip
+
+
 class Printer:
     """Narrates events as they happen. Keeps lines short enough for an 100-column recording."""
 
@@ -72,6 +78,7 @@ class Printer:
         print(
             f"  journal: n_tips={B}{j['n_tips']}{X} com={short(j['com'], 16)} wallet={short(j['wallet_commitment'], 16)}"
         )
+        print(f"  proven: U0 was spent; {shape(j)}")
         print(f"  bounty {m['bounty'] / 1e8} BTC, entry fee {m['entry_fee'] / 1e8} BTC, "
               f"{m['n_instances']} garbled circuits per entry, keep {m['n_retained']}")  # fmt: skip
 
@@ -80,6 +87,7 @@ class Printer:
         print(f"{B}== Entry {d['name']}{X}")
         print(f"  {G}✓{X} setup proof verified against own node: blocks {s['start_hash'][:8]}…{s['end_hash'][:8]}, "
               f"{s['n_tips']} tips committed{' (dev)' if s['fake'] else ''}")  # fmt: skip
+        print(f"  {DIM}proven: {shape(s)}{X}")
 
     def on_guess(self, k: str, d: dict[str, Any]) -> None:
         print(f"  guess: {len(d['tips'])} tips -> x = {short(d['x'], 16)}")

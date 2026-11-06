@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -98,8 +99,9 @@ def create_app(state: Path, dev: bool, rpc: RPC | None = None) -> FastAPI:
         if m.com not in proofs:
             t0 = time.time()
             try:
-                _, out = zk.verify_receipt(Path(m.proof), allow_fake=True)
-                proofs[m.com] = {"fake": out["fake"], "verify_ms": round((time.time() - t0) * 1000)}
+                j, out = zk.verify_receipt(Path(m.proof), allow_fake=True)
+                ms = round((time.time() - t0) * 1000)
+                proofs[m.com] = {"fake": out["fake"], "verify_ms": ms, "journal": asdict(j)}
             except zk.SetupProofError as e:
                 proofs[m.com] = {"error": str(e)}
         return proofs[m.com]
