@@ -111,7 +111,8 @@ function render() {
         d: `M${p[0]},${p[1]} C${p[0] + bend},${p[1]} ${x - bend},${y2} ${x},${y2}`,
         class: `edge${lineage ? " lineage" : ""}${lineage && animateReveal ? " draw" : ""}`, pathLength: 1,
       }, edges);
-      if (lineage && animateReveal) e.style.animationDelay = `${(col * 0.12).toFixed(2)}s`;
+      // The path draws left to right in about 3 s, whatever the history length.
+      if (lineage && animateReveal) e.style.animationDelay = `${((2 * col) / Math.max(L.h1 - L.h0, 1)).toFixed(2)}s`;
       G.edge.set(i.outpoint, e);
     });
     const cls = `tx ${t.kind}${hostTx.has(t.txid) ? " host" : ""}${S.fresh.has(t.txid) ? " new" : ""}`;
