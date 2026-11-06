@@ -323,14 +323,15 @@ the frozen history.
 
 ```sh
 uv run pytest
-node --test tests/test_setup_confirmation.js
+node --test tests/*.js
 ```
 
-Browser control tests use Node's built-in test runner, with no package dependencies.
+Browser tests (setup confirmation, graph layout) use Node's built-in test runner, with no package
+dependencies.
 
 Regtest tests skip without the node, and ZK tests skip without the built prover. ZK tests run the
 guest for real in dev mode (only the seal is fake) and compare its journal with the Python oracle
-`stage.owned_tips`.
+`stage.trace_lineage`; synthetic histories check each shape rule.
 
 CI has a fast lint/regtest job and a pinned RISC Zero build/demo job that rejects skipped tests.
 Guest-execution tests are not production proof generation; fake receipts remain rejected by the

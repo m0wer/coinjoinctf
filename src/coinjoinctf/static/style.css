@@ -27,20 +27,41 @@ button:hover { border-color: var(--blue); } button:disabled { opacity: .4; curso
 button.primary { background: #238636; border-color: #2ea043; margin-left: auto; }
 .muted { color: var(--muted); font-size: 12.5px; } code { font-size: 11.5px; color: #a5d6ff; }
 #guess-list { margin: 0; padding-left: 20px; font: 12px monospace; min-height: 18px; }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 3px 0 10px; vertical-align: -1px; }
+#guess-list .right { color: var(--green); } #guess-list .wrong { color: var(--red); }
+#guess-list .right::after { content: "  tip"; } #guess-list .wrong::after { content: "  not a tip"; }
+#guess-list .missed { color: var(--muted); } #guess-list .missed::after { content: "  missed tip"; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
+.legend i { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin: 0 4px 0 12px; }
 .legend .u0 { background: var(--gold); } .legend .eq { background: #c678dd; } .legend .ch { background: #6e7681; }
-.legend .sel { background: var(--blue); } .legend .tip { background: var(--green); }
-.legend .ring { border: 1.5px solid var(--fg); }
-svg text { fill: var(--muted); font-size: 10px; }
-.edge { fill: none; stroke: #6e7681; stroke-opacity: .28; stroke-width: 1; }
-.edge.lineage { stroke: var(--green); stroke-opacity: 1; stroke-width: 2.5; }
-.tx { fill: #30363d; stroke: #484f58; } .tx.coinjoin { fill: #3b2a55; stroke: #6e40c9; }
-.tx.deposit { fill: #4d3b00; stroke: var(--gold); } .tx.host { stroke: var(--green); stroke-width: 2.5; }
+.legend .sel { border: 3px solid var(--blue); } .legend .tip { background: var(--green); }
+.legend .ring { border: 2px solid var(--fg); } .legend .wrong { border: 3px solid var(--red); }
+.legend .missed { border: 3px dashed var(--green); }
+svg text { fill: var(--muted); font-size: 10px; pointer-events: none; }
+.edge { fill: none; stroke: #8b949e; stroke-opacity: .3; stroke-width: 1.2; transition: opacity .15s; }
+.edge.lineage { stroke: var(--green); stroke-opacity: 1; stroke-width: 3.5; }
+.edge.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .9s ease-out forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.tx { fill: #30363d; stroke: #484f58; stroke-width: 1.5; transition: opacity .15s; }
+.tx.coinjoin { fill: #3b2a55; stroke: #8957e5; }
+.tx.deposit { fill: #4d3b00; stroke: var(--gold); } .tx.host { stroke: var(--green); stroke-width: 3; }
 .tx.new { animation: flash 1s; } @keyframes flash { from { fill: #fff; } }
-.out.unspent { stroke: var(--fg); stroke-width: 1; cursor: pointer; }
-.out.unspent:hover { r: 6; } .out.u0 { fill: var(--gold) !important; stroke: #fff; }
-.out.hostout { fill: var(--green) !important; } .out.sel { fill: var(--blue) !important; stroke: #fff; stroke-width: 2; r: 5; }
-.out.tip { r: 6; stroke: var(--green); stroke-width: 3; }
+.out { stroke: #0d1117; stroke-width: 1; transition: opacity .15s; }
+.out.unspent { stroke: var(--fg); stroke-width: 1.5; }
+.out.hostout { fill: var(--green) !important; } .out.sel { fill: var(--blue) !important; stroke: #fff; }
+.out.u0 { fill: var(--gold) !important; stroke: #fff; stroke-width: 2; }
+.out.tip { stroke: #fff; stroke-width: 2.5; }
+.hit { fill: transparent; } .hit.pick { cursor: pointer; }
+.mark { fill: none; stroke-width: 3; pointer-events: none; }
+.mark.sel { stroke: var(--blue); } .mark.right { stroke: var(--green); } .mark.wrong { stroke: var(--red); }
+.mark.missed { stroke: var(--green); stroke-dasharray: 4 3; }
+.tiplabel, .u0label { font-size: 12px; font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
+.tiplabel { fill: var(--green); } .u0label { fill: var(--gold); }
+.colhead { font-size: 10px; }
+/* After a reveal everything off the host's path fades; hovering traces where a coin went. */
+.revealed .tx:not(.host), .revealed .edge:not(.lineage), .revealed .out:not(.hostout):not(.u0):not(.wrong) { opacity: .2; }
+.tracing .tx:not(.hl), .tracing .edge:not(.hl), .tracing .out:not(.hl) { opacity: .12; }
+.tracing .edge.hl { stroke: var(--fg); stroke-opacity: .9; stroke-width: 2.5; }
+.tracing .edge.lineage.hl { stroke: var(--green); }
 .ev { padding: 5px 0; border-bottom: 1px dashed #21262d; } .ev b { color: #fff; }
 .ev.ok::before { content: "✓ "; color: var(--green); } .ev.err { color: var(--red); }
 .ev.pending { color: var(--gold); } .ev.head { margin-top: 8px; font-weight: 600; color: var(--blue); border: 0; }

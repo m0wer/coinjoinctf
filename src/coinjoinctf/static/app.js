@@ -14,73 +14,158 @@ function el(tag, attrs, parent) {
   return e;
 }
 
-// ---------- graph: one column per block, transactions stacked, outputs on the right edge ----------
-const DOT = 7, PAD = 36, TXW = 16;
-let renderQueued = false;
+// ---------- graph layout (pure, no DOM): one column per block, outputs on each tx's right edge ----------
+const PAD = 30, TOP = 34, MIN_DOT = 7, MAX_DOT = 24, MAX_R = 9;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// Sizes the graph to fill a width x height viewport: the tallest block column sets the row pitch
+// (dot), the block count sets the column width. Below MIN_DOT the graph scrolls instead.
+function layout(txs, range, width, height) {
+  const hs = txs.map((t) => t.height);
+  // A frozen history keeps its full width while it is replayed; a live stage grows.
+  const h0 = range ? range[0] : Math.min(...hs), h1 = range ? range[1] : Math.max(...hs);
+  const rows = (t) => Math.max(t.outputs.length, t.inputs.length, 1);
+  const units = {};  // per column: output rows + 1.6 rows of padding and gap per transaction
+  for (const t of txs) units[t.height - h0] = (units[t.height - h0] || 0) + rows(t) + 1.6;
+  const tallest = Math.max(1, ...Object.values(units));
+  const dot = clamp(Math.floor(((height - TOP - PAD) / tallest) * 10) / 10, MIN_DOT, MAX_DOT);
+  const col = clamp(Math.floor((width - 2 * PAD - 80) / Math.max(h1 - h0, 1)), 28, 140);
+  const txw = clamp(Math.round(col * 0.3), 10, 20);
+  const r = clamp(Math.min(dot * 0.38, (col - txw) * 0.3), 3, MAX_R);
+  const colY = {}, pos = {}, boxes = [];
+  for (const t of txs) {
+    const c = t.height - h0, x = PAD + c * col, y = colY[c] || TOP;
+    const h = (rows(t) + 0.6) * dot;
+    colY[c] = y + h + dot;
+    t.outputs.forEach((o, k) => (pos[o.outpoint] = [x + txw, y + 0.8 * dot + k * dot]));
+    boxes.push({ t, x, y, h, col: c });
+  }
+  return {
+    h0, h1, col, dot, r, txw, boxes, pos,
+    width: PAD * 2 + (h1 - h0) * col + txw + 60,
+    height: Math.max(TOP, ...Object.values(colY)) + PAD,
+  };
+}
+
+// Where an output's coins went: the transactions spending it, their outputs, and so on.
+function trace(txs, outpoints) {
+  const spender = new Map();
+  for (const t of txs) for (const i of t.inputs) spender.set(i.outpoint, t);
+  const outs = new Set(), txids = new Set(), todo = [...outpoints];
+  while (todo.length) {
+    const op = todo.pop();
+    if (outs.has(op)) continue;
+    outs.add(op);
+    const t = spender.get(op);
+    if (t && !txids.has(t.txid)) { txids.add(t.txid); todo.push(...t.outputs.map((o) => o.outpoint)); }
+  }
+  return { outs, txids };
+}
+
+// After a reveal: which guessed outputs are tips, which are not, and which tips were not guessed.
+function classifyGuess(guess, tips) {
+  const g = new Set(guess), t = new Set(tips);
+  return {
+    right: guess.filter((o) => t.has(o)),
+    wrong: guess.filter((o) => !t.has(o)),
+    missed: tips.filter((o) => !g.has(o)),
+  };
+}
+
+// ---------- graph rendering ----------
+let renderQueued = false, animateReveal = false;
 function scheduleRender() { if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; render(); }); } }
+const G = { out: new Map(), edge: new Map(), tx: new Map() };  // rendered elements, for hover tracing
 
 function render() {
   const svg = $("graph");
   svg.innerHTML = "";
   if (!S.txs.length) { svg.setAttribute("width", 0); return; }
+  const sc = $("graph-scroll");
+  const L = layout(S.txs, S.range, sc.clientWidth, sc.clientHeight - 4);
   const spent = new Set();
   S.txs.forEach((t) => t.inputs.forEach((i) => spent.add(i.outpoint)));
-  const heights = S.txs.map((t) => t.height);
-  // A frozen history keeps its full width while it is replayed; a live stage grows.
-  const h0 = S.range ? S.range[0] : Math.min(...heights), h1 = S.range ? S.range[1] : Math.max(...heights);
-  // Fit the whole history in the visible width (scroll only for very long histories).
-  const avail = $("graph-scroll").clientWidth - 2 * PAD - TXW - 20;
-  const COL = Math.max(28, Math.min(120, Math.floor(avail / Math.max(h1 - h0, 1))));
-  const colY = {}, pos = {};
-  const layout = S.txs.map((t) => {
-    const col = t.height - h0;
-    const h = Math.max(t.outputs.length, t.inputs.length, 1) * DOT + 8;
-    const y = colY[col] || PAD + 6;
-    colY[col] = y + h + 16;
-    const x = PAD + col * COL;
-    t.outputs.forEach((o, k) => (pos[o.outpoint] = [x + TXW, y + 7 + k * DOT]));
-    return { t, x, y, h };
-  });
-  svg.setAttribute("width", PAD * 2 + (h1 - h0) * COL + TXW + 20);
-  svg.setAttribute("height", Math.max(...Object.values(colY)) + PAD);
-  for (let hgt = h0; hgt <= h1; hgt++) {
-    el("text", { x: PAD + (hgt - h0) * COL, y: 18 }, svg).textContent = `#${hgt}`;
+  svg.setAttribute("width", L.width);
+  svg.setAttribute("height", L.height);
+  svg.setAttribute("class", S.reveal ? "revealed" : "");
+  const every = Math.ceil(44 / L.col);  // keep block labels from overlapping
+  for (let hgt = L.h0; hgt <= L.h1; hgt += every) {
+    el("text", { x: PAD + (hgt - L.h0) * L.col, y: 18, class: "colhead" }, svg).textContent = `#${hgt}`;
   }
-  const edges = el("g", {}, svg), nodes = el("g", {}, svg);
+  const edges = el("g", {}, svg), nodes = el("g", {}, svg), marks = el("g", {}, svg);
   const owners = S.reveal ? S.reveal.owners : {};
   const hostTx = new Set(S.reveal ? S.reveal.host_txids : []);
-  const tips = new Set(S.reveal ? S.reveal.tips : []);
-  const guess = new Set(S.guess);
-  for (const { t, x, y, h } of layout) {
+  const tips = S.reveal ? S.reveal.tips : [];
+  const mark = {};  // guess ring: "sel" before a reveal, then "right", "wrong" or "missed"
+  if (!S.reveal) S.guess.forEach((op) => (mark[op] = "sel"));
+  else for (const [kind, ops] of Object.entries(classifyGuess(S.guess, tips))) ops.forEach((op) => (mark[op] = kind));
+  G.out.clear(); G.edge.clear(); G.tx.clear();
+  const bend = Math.max(20, L.col * 0.8);
+  for (const { t, x, y, h, col } of L.boxes) {
     t.inputs.forEach((i, k) => {
-      const p = pos[i.outpoint];
+      const p = L.pos[i.outpoint];
       if (!p) return;
-      const y2 = y + 6 + (k * (h - 12)) / Math.max(t.inputs.length - 1, 1);
-      const cls = owners[i.outpoint] === "host" ? "edge lineage" : "edge";
-      el("path", { d: `M${p[0]},${p[1]} C${p[0] + 45},${p[1]} ${x - 45},${y2} ${x},${y2}`, class: cls }, edges);
+      const y2 = y + 0.5 * L.dot + (k * (h - L.dot)) / Math.max(t.inputs.length - 1, 1);
+      const lineage = owners[i.outpoint] === "host";
+      const e = el("path", {
+        d: `M${p[0]},${p[1]} C${p[0] + bend},${p[1]} ${x - bend},${y2} ${x},${y2}`,
+        class: `edge${lineage ? " lineage" : ""}${lineage && animateReveal ? " draw" : ""}`, pathLength: 1,
+      }, edges);
+      if (lineage && animateReveal) e.style.animationDelay = `${(col * 0.12).toFixed(2)}s`;
+      G.edge.set(i.outpoint, e);
     });
     const cls = `tx ${t.kind}${hostTx.has(t.txid) ? " host" : ""}${S.fresh.has(t.txid) ? " new" : ""}`;
-    const r = el("rect", { x, y, width: TXW, height: h, rx: 3, class: cls }, nodes);
-    el("title", {}, r).textContent =
+    const rect = el("rect", { x, y, width: L.txw, height: h, rx: 4, class: cls }, nodes);
+    el("title", {}, rect).textContent =
       `${t.kind} ${t.txid}\nblock ${t.height}, ${t.inputs.length} in, ${t.outputs.length} out` +
       (t.meta && t.meta.amount ? `\namount ${btc(t.meta.amount)} BTC, ${t.meta.makers || 0} makers` : "");
+    rect.addEventListener("mouseenter", () => highlight(t.outputs.map((o) => o.outpoint), t.txid));
+    rect.addEventListener("mouseleave", () => highlight(null));
+    G.tx.set(t.txid, rect);
     const counts = {};
     t.outputs.forEach((o) => (counts[o.value] = (counts[o.value] || 0) + 1));
     for (const o of t.outputs) {
-      const [cx, cy] = pos[o.outpoint];
+      const [cx, cy] = L.pos[o.outpoint];
       const eq = counts[o.value] > 1, unspent = !spent.has(o.outpoint), isU0 = o.outpoint === S.u0;
+      const isTip = tips.includes(o.outpoint);
+      const r = isU0 ? L.r * 1.5 : L.r;
       const c = el("circle", {
-        cx, cy, r: isU0 ? 5.5 : 3,
-        class: ["out", unspent && "unspent", isU0 && "u0", guess.has(o.outpoint) && "sel",
-                owners[o.outpoint] === "host" && "hostout", tips.has(o.outpoint) && "tip"].filter(Boolean).join(" "),
+        cx, cy, r,
+        class: ["out", unspent && "unspent", isU0 && "u0", mark[o.outpoint],
+                owners[o.outpoint] === "host" && "hostout", isTip && "tip"].filter(Boolean).join(" "),
         fill: eq ? `hsl(${hue(t.txid + o.value)},65%,62%)` : "#6e7681",
       }, nodes);
-      el("title", {}, c).textContent = `${o.outpoint}\n${btc(o.value)} BTC${unspent ? " (unspent)" : ""}${isU0 ? "\nU0: start here" : ""}`;
-      if (unspent) c.addEventListener("click", () => toggleGuess(o.outpoint));
-      if (isU0) el("text", { x: cx + 8, y: cy + 4, fill: "#f2c94c" }, nodes).textContent = "U0";
+      G.out.set(o.outpoint, c);
+      if (mark[o.outpoint]) el("circle", { cx, cy, r: r + 4, class: `mark ${mark[o.outpoint]}` }, marks);
+      if (isTip) {
+        el("text", { x: cx + r + 6, y: cy + 4, class: "tiplabel" }, marks).textContent = `tip ${btc(o.value)}`;
+      }
+      if (isU0) el("text", { x: cx + r + 5, y: cy + 4, class: "u0label" }, marks).textContent = "U0";
+      // A larger invisible target on top makes small outputs easy to hover and click.
+      const hit = el("circle", { cx, cy, r: Math.max(r + 3, L.dot / 2), class: `hit${unspent ? " pick" : ""}` }, nodes);
+      el("title", {}, hit).textContent =
+        `${o.outpoint}\n${btc(o.value)} BTC${unspent ? " (unspent, click to guess)" : ""}${isU0 ? "\nU0: start here" : ""}`;
+      if (unspent) hit.addEventListener("click", () => toggleGuess(o.outpoint));
+      hit.addEventListener("mouseenter", () => highlight([o.outpoint]));
+      hit.addEventListener("mouseleave", () => highlight(null));
     }
   }
+  animateReveal = false;
   S.fresh.clear();
+}
+
+function highlight(outpoints, txid) {
+  const svg = $("graph");
+  for (const e of svg.querySelectorAll(".hl")) e.classList.remove("hl");
+  svg.classList.toggle("tracing", !!outpoints);
+  if (!outpoints) return;
+  const { outs, txids } = trace(S.txs, outpoints);
+  if (txid) txids.add(txid);
+  for (const op of outs) {
+    if (G.out.has(op)) G.out.get(op).classList.add("hl");
+    if (G.edge.has(op)) G.edge.get(op).classList.add("hl");
+  }
+  for (const id of txids) if (G.tx.has(id)) G.tx.get(id).classList.add("hl");
 }
 
 function toggleGuess(op) {
@@ -90,7 +175,11 @@ function toggleGuess(op) {
 }
 
 function renderGuess() {
-  $("guess-list").innerHTML = S.guess.map((g) => `<li>${short(g.split(":")[0], 14)}:${g.split(":")[1]}</li>`).join("");
+  const item = (g, cls = "") => `<li class="${cls}">${short(g.split(":")[0], 14)}:${g.split(":")[1]}</li>`;
+  if (!S.reveal) { $("guess-list").innerHTML = S.guess.map((g) => item(g)).join(""); return; }
+  const v = classifyGuess(S.guess, S.reveal.tips);
+  $("guess-list").innerHTML = S.guess.map((g) => item(g, v.right.includes(g) ? "right" : "wrong")).join("") +
+    v.missed.map((g) => item(g, "missed")).join("");
 }
 
 // ---------- protocol timeline ----------
@@ -179,7 +268,13 @@ const H = {
        `Conditional on an honest random selection; batch escape bound 1/${Math.round(1 / e.cheat_probability)}. ` +
        `The answer stays hidden.</span></div>`);
   },
-  reveal(e) { S.reveal = e; render(); tl(`Revealed: ${e.host_txids.length} host transactions, tips highlighted in green`, "ok"); },
+  reveal(e) {
+    S.reveal = e; animateReveal = true;
+    render(); renderGuess();
+    const v = classifyGuess(S.guess, e.tips);
+    tl(`Revealed: ${e.host_txids.length} host transactions, path from U0 to the ${e.tips.length} tips in green` +
+       (S.guess.length ? `. Your guess: ${v.right.length} right, ${v.wrong.length} wrong, ${v.missed.length} missed` : ""), "ok");
+  },
   error(e) { tl(e.message, "err"); },
   idle() { S.idles++; setBusy(null); },
 };
