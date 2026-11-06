@@ -253,28 +253,26 @@ from U0 to the tips is drawn in green.
   service: unauthenticated correct-answer, near-miss and reveal endpoints intentionally disclose
   host knowledge. Do not expose it to participants as their interface.
 
-### Brute-force limits
+### Brute force
 
-The default tumbler finishes with three tips. Graph depth and transaction count are not security
-parameters: many paths may lead to the same final set. With `M` plausible terminal outputs and a
-public tip count `k`, there are at most `C(M, k)` candidate sets, before amount, timing, co-spend and
-maker-information filtering. For 1,000 outputs and three tips, that is only 166 million sets
-(27.3 bits at most), not an established security level. If the three destination transactions are
-known, choosing one among 4 to 7 equal outputs in each leaves only 64 to 343 combinations.
+A guess is a set of outputs, so no encoding makes it harder to guess: the answer space is the number
+of `k`-subsets of plausible outputs. Guesses cannot be tested offline (salted commitment, fresh
+garblings per entry), so each test costs an entry fee, and the default 100:1 bounty/fee ratio needs
+about 1% confidence to break even. In the 31-block demo history (211 unspent outputs, 3 tips) a random
+guess wins one time in 1.5 million, but simple filters do far better: equal-amount outputs of distinct
+transactions summing to just under U0 leave 136 to 327 candidates, and knowing the three destination
+coinjoins leaves 16 to 147. The demo is deliberately small; a real challenge should freeze a much
+larger history so such filters still leave many candidates. A lost entry reveals only that its set
+is wrong (the on-chain guess is an unsalted digest, so rejected sets become public). A win publishes
+the answer digest, which is enough to win again, so each history supports one winner.
 
-The salted commitment and single-use garblings provide no free exact equality oracle under their
-cryptographic assumptions. Analysts can still rank candidates or derive an answer using side
-information. Each ordinary exact test costs an entry. Ignoring mining fees, a candidate with success
-probability `p` has expected profit `p*bounty - (1-p)*entry_fee`; the default 100:1 bounty/fee ratio
-makes roughly 1% confidence near break-even. Assess the attacker's best candidate probabilities and
-budget, not just a graph size. The contract accepts a 128-bit answer digest and cannot establish how
-it was learned; digest leakage is sufficient to win without recovering the path.
+### Performance
 
 Measured on a 16-core CPU (no GPU):
 
 | | |
 |---|---|
-| Setup proof, 31 blocks, 44 txs | 3.7M cycles, 7 min, 9.6 GB RAM |
+| Setup proof, 31 blocks, 44 txs | 4.2M cycles, 12 min (test suite running in parallel), 9.6 GB RAM |
 | Setup proof, 36 blocks, 61 txs | 6.55M cycles, about 20 min (machine under load), 224 KB succinct receipt |
 | Verifying the receipt | 15 to 40 ms |
 | One entry on regtest | about 3 s: garble 20, check 17, fund, assert, deliver, evaluate, settle or claim |
