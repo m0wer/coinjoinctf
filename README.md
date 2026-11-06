@@ -97,7 +97,10 @@ sequenceDiagram
 The host commits to the answer `y` with `com = SHA256(y || r)` and proves in the RISC Zero zkVM,
 without revealing its wallet or the tips, that:
 
-- the private raw blocks form a hash chain and every transaction matches its merkle root;
+- it read exactly the transactions of the public blocks from the start hash to the end hash:
+  each header links to the previous one and each block's transactions match its merkle root.
+  The blocks are not secret, but the guest only sees what the host feeds it, so without these
+  checks the host could drop the transaction spending a tip or invent an extra owned output;
 - the wallet with commitment `SHA256(seed)` (P2WPKH keys `SHA256("coinjoinctf/wallet/v1" || seed || i)`
   for `i < key_limit`) owns U0, which is created in the range;
 - the tips are exactly the owned lineage outputs unspent at the end block, and `com` hashes them.
