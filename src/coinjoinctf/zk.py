@@ -1,8 +1,9 @@
 """Setup proof (RISC Zero): build the guest input from the node, prove, and verify the journal.
 
 The guest (zk/methods/guest) proves, without revealing the wallet seed or the tips, that the
-committed answer ``com`` encodes the complete set of tips of U0's lineage over a block range the
-verifier anchors to its own node. ``stage.owned_tips`` is the Python reference of that statement.
+committed answer ``com`` encodes the complete, non-empty set of tips of U0's lineage over a block
+range the verifier anchors to its own node, that U0 was spent, and how the lineage is shaped
+(minimums over the tips). ``stage.trace_lineage`` is the Python reference of that statement.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from coinjoinctf.rpc import RPC
 
 ZK_DIR = Path(__file__).resolve().parents[2] / "zk"
 BINARY = Path(os.environ.get("CTF_ZK_BIN", ZK_DIR / "target" / "release" / "ctf-zk"))
-_JOURNAL = struct.Struct("<32sI32sI32s32sII32s")
+_JOURNAL = struct.Struct("<32sI32sI32s32sII32sIIII")
 
 
 class SetupProofError(Exception):
@@ -39,15 +40,22 @@ class Journal:
     n_blocks: int
     n_tips: int
     com: str
+    # Proven shape of the lineage (see stage.Lineage): minimums over the tips.
+    tip_txs: int
+    min_depth: int
+    min_anonymity: int
+    min_foreign_inputs: int
 
     @classmethod
     def parse(cls, data: bytes) -> Journal:
         if len(data) != _JOURNAL.size:
-            raise SetupProofError(f"journal must be {_JOURNAL.size} bytes, got {len(data)}")
-        wc, limit, u0_txid, u0_vout, start, end, n_blocks, n_tips, com = _JOURNAL.unpack(data)
+            raise SetupProofError(
+                f"journal must be {_JOURNAL.size} bytes, got {len(data)} (receipt from another guest?)"
+            )
+        wc, limit, u0_txid, u0_vout, start, end, n_blocks, n_tips, com, *shape = _JOURNAL.unpack(data)
         return cls(
             wc.hex(), limit, f"{u0_txid[::-1].hex()}:{u0_vout}", start[::-1].hex(), end[::-1].hex(),
-            n_blocks, n_tips, com.hex(),
+            n_blocks, n_tips, com.hex(), *shape,
         )  # fmt: skip
 
 

@@ -546,25 +546,57 @@ def owned_spks(seed: bytes, key_limit: int) -> set[bytes]:
     return {bytes(p2wpkh(k)) for i in range(key_limit) if (k := wallet_key(seed, i)) is not None}
 
 
-def owned_tips(rpc: RPC, seed: bytes, key_limit: int, u0: str, start: int, end: int) -> list[str]:
+@dataclass(frozen=True)
+class Lineage:
+    """The setup statement's answer and the structure its proof discloses, as minimums over tips."""
+
+    tips: list[str]
+    tip_txs: int  # distinct transactions creating the tips
+    min_depth: int  # transactions on the shortest lineage path from U0
+    min_anonymity: int  # distinct scripts receiving the tip's exact value in its transaction
+    min_foreign_inputs: int  # non-lineage inputs, over every lineage ancestor transaction
+
+
+def trace_lineage(rpc: RPC, seed: bytes, key_limit: int, u0: str, start: int, end: int) -> Lineage:
     """Reference for the ZK statement: scan blocks [start, end] in order. The lineage is U0 (which
-    must be owned and created in range) plus every owned output of a transaction spending a lineage
-    output. Tips are the lineage outputs still unspent at ``end``."""
+    must be owned, created and spent in range) plus every owned output of a transaction spending a
+    lineage output. Tips are the lineage outputs still unspent at ``end``; there must be one."""
     owned = owned_spks(seed, key_limit)
-    lineage: set[str] = set()
+    lineage: dict[str, tuple[int, float, int]] = {}  # outpoint -> (depth, foreign, anonymity)
     spent: set[str] = set()
     for h in range(start, end + 1):
         for tx in rpc.getblock(rpc.getblockhash(h), 2)["tx"]:
-            hit = {f"{i['txid']}:{i['vout']}" for i in tx["vin"] if "txid" in i} & lineage
-            spent |= hit
-            for o in tx["vout"]:
-                op, spk = f"{tx['txid']}:{o['n']}", bytes.fromhex(o["scriptPubKey"]["hex"])
+            ins = [f"{i['txid']}:{i['vout']}" for i in tx["vin"] if "txid" in i]
+            parents = [lineage[i] for i in ins if i in lineage]
+            spent.update(i for i in ins if i in lineage)
+            foreign = len(tx["vin"]) - len(parents)
+            outs = [(round(o["value"] * 1e8), bytes.fromhex(o["scriptPubKey"]["hex"])) for o in tx["vout"]]
+            for n, (value, spk) in enumerate(outs):
+                op = f"{tx['txid']}:{n}"
                 if op == u0:
                     if spk not in owned:
                         raise ValueError("U0 is not owned by the committed wallet")
-                    lineage.add(op)
-                elif hit and spk in owned:
-                    lineage.add(op)
+                    lineage[op] = (0, math.inf, 0)  # U0 must be spent: never a tip
+                elif parents and spk in owned:
+                    depth = 1 + min(p[0] for p in parents)
+                    anonymity = len({s for v, s in outs if v == value})
+                    lineage[op] = (depth, min(foreign, *(p[1] for p in parents)), anonymity)
     if u0 not in lineage:
         raise ValueError("U0 is not created in the committed block range")
-    return sorted(lineage - spent)
+    if u0 not in spent:
+        raise ValueError("U0 is never spent in the committed block range")
+    tips = sorted(set(lineage) - spent)
+    if not tips:
+        raise ValueError("the lineage has no unspent tips")
+    stats = [lineage[t] for t in tips]
+    return Lineage(
+        tips=tips,
+        tip_txs=len({t.split(":")[0] for t in tips}),
+        min_depth=min(s[0] for s in stats),
+        min_anonymity=min(s[2] for s in stats),
+        min_foreign_inputs=int(min(s[1] for s in stats)),
+    )
+
+
+def owned_tips(rpc: RPC, seed: bytes, key_limit: int, u0: str, start: int, end: int) -> list[str]:
+    return trace_lineage(rpc, seed, key_limit, u0, start, end).tips

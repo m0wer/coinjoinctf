@@ -14,7 +14,7 @@ from coinjoinctf import zk
 from coinjoinctf.circuit import answer_commitment
 from coinjoinctf.game import GameManifest, History, Host, answer_hash
 from coinjoinctf.rpc import RPC, RPCError, node
-from coinjoinctf.stage import Stage, StageConfig, StageResult
+from coinjoinctf.stage import Stage, StageConfig, StageResult, trace_lineage
 
 pytestmark = [
     pytest.mark.regtest,
@@ -63,6 +63,18 @@ def test_journal_matches_oracle(stage: StageResult, proven: tuple) -> None:
     assert j["com"] == answer_commitment(answer_hash(stage.tips), host.r).hex() == m.com
     assert j["wallet_commitment"] == hashlib.sha256(bytes.fromhex(stage.tumbler_seed)).hexdigest()
     assert (j["u0"], j["start_hash"], j["end_hash"]) == (stage.u0, stage.start_hash, stage.end_hash)
+
+
+def test_journal_shape_matches_oracle(rpc: RPC, stage: StageResult, proven: tuple) -> None:
+    j = proven[2]["journal_fields"]
+    seed = bytes.fromhex(stage.tumbler_seed)
+    ref = trace_lineage(rpc, seed, stage.key_limit, stage.u0, stage.start_height, stage.end_height)
+    assert ref.tips == stage.tips
+    shape = ("tip_txs", "min_depth", "min_anonymity", "min_foreign_inputs")
+    assert {k: j[k] for k in shape} == {k: getattr(ref, k) for k in shape}
+    # The tumbler: three destination coinjoins after four mixdepth hops, >= 3 makers per coinjoin.
+    assert ref.tip_txs == 3 and ref.min_depth >= 4
+    assert ref.min_anonymity >= 4 and ref.min_foreign_inputs >= 3
 
 
 def test_verifier_accepts_matching_manifest(rpc: RPC, proven: tuple) -> None:

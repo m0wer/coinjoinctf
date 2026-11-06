@@ -102,16 +102,23 @@ without revealing its wallet or the tips, that:
   The blocks are not secret, but the guest only sees what the host feeds it, so without these
   checks the host could drop the transaction spending a tip or invent an extra owned output;
 - the wallet with commitment `SHA256(seed)` (P2WPKH keys `SHA256("coinjoinctf/wallet/v1" || seed || i)`
-  for `i < key_limit`) owns U0, which is created in the range;
-- the tips are exactly the owned lineage outputs unspent at the end block, and `com` hashes them.
+  for `i < key_limit`) owns U0, which is created **and spent** in the range;
+- the tips are exactly the owned lineage outputs unspent at the end block, there is at least one,
+  and `com` hashes them;
+- the lineage has a public shape, as minimums over the tips: how many distinct transactions
+  created them, the shortest hop count from U0, the anonymity set (distinct scripts receiving the
+  tip's exact amount in its transaction) and the fewest inputs from outside the lineage in any
+  transaction on the way. A host cannot pass off coins that never moved, or a single self-transfer,
+  without these numbers showing it.
 
 This establishes an answer under that definition, not every key the human host controls or a unique
-economic allocation of satoshis through a CoinJoin. The tip set may be empty.
+economic allocation of satoshis through a CoinJoin.
 
 The public journal holds the wallet commitment, `key_limit`, U0, the first and last block hashes,
-the block count, the tip count and `com`. Every participant must verify the receipt before entering
-and checks the block hashes against **its own node**. Proving takes minutes; verifying takes
-milliseconds.
+the block count, the tip count, `com` and the four shape numbers. Every participant must verify the
+receipt before entering and checks the block hashes against **its own node**. The CLI and the web
+page show the proven shape, for example "3 tips in 3 txs, each >= 4 hops from U0, anonymity set
+>= 4, >= 3 outside inputs per hop". Proving takes minutes; verifying takes milliseconds.
 
 ### 2. Garbled circuit: the outcome is computed, not claimed
 
@@ -229,6 +236,11 @@ from U0 to the tips is drawn in green.
   that branch, even if the same person controls another wallet. The proof covers the frozen block
   range only and authenticates headers against the participant's validating node, not through an
   independent Bitcoin consensus implementation in the guest.
+- **The proven shape is a consistency fact, not evidence of real mixing.** The guest cannot tell
+  who controls the other inputs and outputs: a host can fund its own "makers", pad equal-amount
+  outputs to addresses outside the committed wallet, or spend unrelated coins (they count as
+  outside inputs). The numbers also narrow the search: `min_anonymity` is the smallest coinjoin
+  size among tip transactions and `min_depth` the shortest path length.
 - **Restricted proof histories.** The guest rejects transactions with exactly 64 bytes of stripped
   (non-witness) serialization to prevent Merkle leaf/internal-node ambiguity. Such transactions are
   not necessarily invalid under Bitcoin consensus; histories containing them are unsupported here.

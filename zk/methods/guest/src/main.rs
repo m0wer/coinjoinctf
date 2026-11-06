@@ -3,14 +3,20 @@
 //! Private input: wallet seed, commitment randomness r, and the raw blocks [start, end].
 //! Statement: the blocks form a hash chain whose transactions match their merkle roots; the
 //! committed wallet (keys SHA256(tag || seed || i), i < key_limit, as P2WPKH) owns U0, which is
-//! created in range; the lineage is U0 plus every owned output of a transaction spending a lineage
-//! output; the tips T are the lineage outputs unspent at `end`; and com = SHA256(y || r) with
-//! y = SHA256(sorted "txid:vout" lines of T joined by "\n")[:16].
-//! Public journal (176 bytes): SHA256(seed) | key_limit | u0 txid | u0 vout | start hash |
-//! end hash | n_blocks | |T| | com. Integers are little-endian; hashes in internal byte order.
-//! Mirrors coinjoinctf.stage.owned_tips, which is the reference implementation.
+//! created and spent in range; the lineage is U0 plus every owned output of a transaction spending
+//! a lineage output; the tips T are the lineage outputs unspent at `end`, and T is not empty; and
+//! com = SHA256(y || r) with y = SHA256(sorted "txid:vout" lines of T joined by "\n")[:16].
+//! Disclosed structure, as minimums over T:
+//!   tip_txs: distinct transactions creating T;
+//!   min_depth: transactions on the shortest lineage path from U0;
+//!   min_anonymity: distinct scriptPubKeys receiving the tip's exact value in its transaction;
+//!   min_foreign_inputs: inputs that are not lineage outputs, over every lineage ancestor transaction.
+//! Public journal (192 bytes): SHA256(seed) | key_limit | u0 txid | u0 vout | start hash |
+//! end hash | n_blocks | |T| | com | tip_txs | min_depth | min_anonymity | min_foreign_inputs.
+//! Integers are little-endian; hashes in internal byte order.
+//! Mirrors coinjoinctf.stage.trace_lineage, which is the reference implementation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 use k256::elliptic_curve::sec1::ToEncodedPoint;
@@ -63,7 +69,24 @@ impl<'a> Reader<'a> {
 struct Tx {
     txid: Hash,
     inputs: Vec<OutPoint>,
-    outputs: Vec<Vec<u8>>, // scriptPubKeys
+    outputs: Vec<(u64, Vec<u8>)>, // (value, scriptPubKey)
+}
+
+/// What the lineage knows about one of its outputs.
+#[derive(Clone, Copy)]
+struct Lineage {
+    depth: u32,     // transactions on the shortest lineage path from U0
+    foreign: u32,   // fewest non-lineage inputs of any lineage ancestor transaction
+    anonymity: u32, // distinct scriptPubKeys receiving this exact value in the same transaction
+}
+
+fn anonymity(outputs: &[(u64, Vec<u8>)], value: u64) -> u32 {
+    let same: HashSet<&[u8]> = outputs
+        .iter()
+        .filter(|(v, _)| *v == value)
+        .map(|(_, spk)| spk.as_slice())
+        .collect();
+    same.len() as u32
 }
 
 /// Parse one transaction (legacy or BIP144 serialization). The txid covers non-witness data only.
@@ -86,9 +109,9 @@ fn parse_tx(r: &mut Reader) -> Tx {
     let n_out = r.varint();
     let mut outputs = Vec::with_capacity(n_out);
     for _ in 0..n_out {
-        r.take(8);
+        let value = u64::from_le_bytes(r.take(8).try_into().unwrap());
         let len = r.varint();
-        outputs.push(r.take(len).to_vec());
+        outputs.push((value, r.take(len).to_vec()));
     }
     let body_end = r.pos;
     if segwit {
@@ -172,7 +195,7 @@ fn main() {
     assert!(n_blocks > 0 && key_limit > 0);
 
     let owned = owned_spks(&seed, key_limit);
-    let mut lineage: HashSet<OutPoint> = HashSet::new();
+    let mut lineage: HashMap<OutPoint, Lineage> = HashMap::new();
     let mut spent: HashSet<OutPoint> = HashSet::new();
     let (mut first, mut prev): (Hash, Option<Hash>) = ([0; 32], None);
     for _ in 0..n_blocks {
@@ -192,23 +215,44 @@ fn main() {
         let mut txids = Vec::with_capacity(n_tx);
         for _ in 0..n_tx {
             let tx = parse_tx(&mut b);
-            let mut hit = false;
+            // (shortest depth, fewest foreign inputs) over the lineage inputs, if any
+            let mut parent: Option<(u32, u32)> = None;
+            let mut foreign = 0u32;
             for i in &tx.inputs {
-                if lineage.contains(i) {
-                    spent.insert(*i);
-                    hit = true;
+                match lineage.get(i) {
+                    Some(l) => {
+                        spent.insert(*i);
+                        parent = Some(match parent {
+                            Some((d, f)) => (d.min(l.depth), f.min(l.foreign)),
+                            None => (l.depth, l.foreign),
+                        });
+                    }
+                    None => foreign += 1,
                 }
             }
-            for (n, spk) in tx.outputs.iter().enumerate() {
+            for (n, (value, spk)) in tx.outputs.iter().enumerate() {
                 let op = (tx.txid, n as u32);
                 if op == u0 {
                     assert!(
                         owned.contains(spk),
                         "U0 is not owned by the committed wallet"
                     );
-                    lineage.insert(op);
-                } else if hit && owned.contains(spk) {
-                    lineage.insert(op);
+                    // U0 must be spent, so it is never a tip and its anonymity is never read.
+                    let start = Lineage {
+                        depth: 0,
+                        foreign: u32::MAX,
+                        anonymity: 0,
+                    };
+                    lineage.insert(op, start);
+                } else if let Some((depth, f)) = parent {
+                    if owned.contains(spk) {
+                        let next = Lineage {
+                            depth: depth + 1,
+                            foreign: f.min(foreign),
+                            anonymity: anonymity(&tx.outputs, *value),
+                        };
+                        lineage.insert(op, next);
+                    }
                 }
             }
             txids.push(tx.txid);
@@ -227,16 +271,32 @@ fn main() {
     }
     assert!(r.done(), "trailing input");
     assert!(
-        lineage.contains(&u0),
+        lineage.contains_key(&u0),
         "U0 is not created in the block range"
     );
+    assert!(spent.contains(&u0), "U0 is never spent in the block range");
 
-    let mut tips: Vec<String> = lineage.difference(&spent).map(outpoint_str).collect();
-    tips.sort();
-    let y = &sha256(tips.join("\n").as_bytes())[..16];
+    // U0 is spent, so every tip was created by a lineage transaction (depth >= 1, finite foreign).
+    let tips: Vec<(&OutPoint, &Lineage)> = lineage
+        .iter()
+        .filter(|(op, _)| !spent.contains(*op))
+        .collect();
+    assert!(!tips.is_empty(), "the lineage has no unspent tips");
+    let tip_txs = tips
+        .iter()
+        .map(|(op, _)| op.0)
+        .collect::<HashSet<_>>()
+        .len() as u32;
+    let min = |field: fn(&Lineage) -> u32| tips.iter().map(|(_, l)| field(l)).min().unwrap();
+    let (min_depth, min_anonymity, min_foreign) =
+        (min(|l| l.depth), min(|l| l.anonymity), min(|l| l.foreign));
+
+    let mut names: Vec<String> = tips.iter().map(|(op, _)| outpoint_str(op)).collect();
+    names.sort();
+    let y = &sha256(names.join("\n").as_bytes())[..16];
     let com = sha256(&[y, &nonce[..]].concat());
 
-    let mut journal = Vec::with_capacity(176);
+    let mut journal = Vec::with_capacity(192);
     journal.extend(sha256(&seed));
     journal.extend(key_limit.to_le_bytes());
     journal.extend(u0.0);
@@ -246,5 +306,8 @@ fn main() {
     journal.extend(n_blocks.to_le_bytes());
     journal.extend((tips.len() as u32).to_le_bytes());
     journal.extend(com);
+    for stat in [tip_txs, min_depth, min_anonymity, min_foreign] {
+        journal.extend(stat.to_le_bytes());
+    }
     env::commit_slice(&journal);
 }
