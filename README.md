@@ -187,11 +187,12 @@ label hides its bit.
 ## Demo walkthrough
 
 The web UI shows the transaction graph on the left (one column per block, equal-amount outputs
-colored per coinjoin, unspent outputs ringed, U0 in gold) and the protocol on the right.
+colored per coinjoin, unspent outputs ringed, U0 in gold) and the protocol on the right. The graph
+fills the screen, and hovering an output or transaction traces where its coins went.
 
 **1. The frozen history.** About 30 blocks of JoinMarket activity: makers with fidelity bonds,
 random takers, and the host's tumbler hidden among them. The game is published with a real STARK
-receipt that the page verifies in milliseconds.
+receipt that the page verifies in milliseconds, and the proven lineage shape is shown in green.
 
 ![Frozen history](docs/img/history.png)
 
@@ -213,7 +214,8 @@ entry fee plus bounty with the win label, unilaterally.
 ![Win and claim](docs/img/win.png)
 
 **5. Reveal (optional).** After the game, the host can disclose its transactions: the lineage
-from U0 to the tips is drawn in green.
+from U0 to the tips is drawn in green, everything else fades, the tips are labeled with their
+amounts and each guess is marked right, wrong or missed.
 
 ## Trust model and known limits
 
